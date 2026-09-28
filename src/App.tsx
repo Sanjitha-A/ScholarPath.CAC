@@ -11,6 +11,7 @@ import {
   StoredUser,
   StudentProfile,
 } from "./lib/auth";
+import scholarPathLogo from "./imports/scholarpath-logo.png";
 
 const heroImage =
   "https://images.unsplash.com/photo-1758270705317-3ef6142d306f?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&ixlib=rb-4.1.0&q=85&w=1400";
@@ -771,12 +772,11 @@ export default function App() {
       <header className="sticky top-0 z-40 border-b border-blue-100/80 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
           <a href="#" className="flex items-center gap-3" aria-label="ScholarPath home">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#0878c9] text-white shadow-md shadow-blue-200">
-              <Icon className="h-6 w-6">
-                <path d="m3 10 9-5 9 5-9 5-9-5Z" />
-                <path d="M7 12.5V17c3 2 7 2 10 0v-4.5M21 10v6" />
-              </Icon>
-            </span>
+            <img
+              src={scholarPathLogo}
+              alt="ScholarPath logo"
+              className="h-12 w-12 rounded-xl object-cover shadow-md shadow-blue-200"
+            />
             <span className="text-xl font-extrabold tracking-tight text-[#07345e]">
               Scholar<span className="text-[#cf334a]">Path</span>
             </span>
