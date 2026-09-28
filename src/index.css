@@ -14,24 +14,64 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  min-height: 44px;
 }
 
 button,
 a {
-  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button {
   cursor: pointer;
 }
 
+img,
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 ::selection {
   color: #ffffff;
   background: #0878c9;
+}
+
+@media (max-width: 640px) {
+  body {
+    font-size: 15px;
+  }
 }
