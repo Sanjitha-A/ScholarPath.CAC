@@ -1,68 +1,30 @@
-import { describe, expect, it } from "vitest";
-import { createUser, getStoredUsers, loginUser, saveUserProfile } from "./auth";
+import { beforeEach, describe, expect, it } from "vitest";
+import { clearLegacyAuthData, SESSION_KEY, STORAGE_KEY } from "./auth";
 
-describe("ScholarPath auth flow", () => {
-  it("registers a user and then allows a matching login", () => {
-    const users = getStoredUsers();
-    const created = createUser(users, {
-      username: "alex",
-      password: "secret123",
-      profile: {
-        ethnicity: "Hispanic/Latino",
-        gender: "Woman",
-        age: "19",
-        gpa: "3.9",
-        apCount: "6",
-      },
-    });
+describe("ScholarPath session storage", () => {
+  const values = new Map<string, string>();
 
-    expect(created).toHaveLength(users.length + 1);
-    expect(loginUser(created, "alex", "secret123")).toBeTruthy();
-    expect(loginUser(created, "alex", "wrongPass")).toBeNull();
-  });
-
-  it("accepts a registered account even when legacy saved data has extra whitespace", () => {
-    const legacyUsers = [
-      {
-        username: "  Alex  ",
-        password: " secret123 ",
-        profile: {
-          ethnicity: "",
-          gender: "",
-          age: "",
-          gpa: "",
-          apCount: "",
+  beforeEach(() => {
+    values.clear();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem: (key: string) => values.get(key) ?? null,
+          setItem: (key: string, value: string) => values.set(key, value),
+          removeItem: (key: string) => values.delete(key),
         },
       },
-    ];
-
-    expect(loginUser(legacyUsers, "alex", "secret123")).toMatchObject({ username: "  Alex  " });
+    });
   });
 
-  it("updates a profile only for the logged-in user", () => {
-    const initialUsers = [
-      {
-        username: "riley",
-        password: "abc123",
-        profile: {
-          ethnicity: "",
-          gender: "",
-          age: "",
-          gpa: "",
-          apCount: "",
-        },
-      },
-    ];
-
-    const updated = saveUserProfile(initialUsers, "riley", {
-      ethnicity: "Asian",
-      gender: "Non-binary",
-      age: "21",
-      gpa: "3.8",
-      apCount: "8",
-    });
-
-    expect(updated[0].profile.ethnicity).toBe("Asian");
-    expect(updated[0].profile.gpa).toBe("3.8");
+  it("removes old browser-stored accounts and username-only sessions", () => {
+    values.set(STORAGE_KEY, JSON.stringify([{ username: "alex", password: "plain-text" }]));
+    values.set(SESSION_KEY, "alex");
+    values.set("scholarpath_token_v1", "legacy-token");
+    clearLegacyAuthData();
+    expect(values.has(STORAGE_KEY)).toBe(false);
+    expect(values.has(SESSION_KEY)).toBe(false);
+    expect(values.has("scholarpath_token_v1")).toBe(false);
   });
 });

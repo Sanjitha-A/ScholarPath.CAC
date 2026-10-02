@@ -1,13 +1,8 @@
 import confetti from "canvas-confetti";
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import {
-  createUser,
-  getStoredSession,
-  getStoredUsers,
-  loginUser,
+  clearLegacyAuthData,
   profileDefaults,
-  saveStoredSession,
-  saveUserProfile,
   StoredUser,
   StudentProfile,
 } from "./lib/auth";
@@ -131,6 +126,10 @@ function AppModal({
         setError("Full name, username, and password are required.");
         return;
       }
+      if (password.length < 12) {
+        setError("Choose a password with at least 12 characters.");
+        return;
+      }
 
       onRegister({ fullName, username, password });
       return;
@@ -228,12 +227,12 @@ function AppModal({
             <input
               name="password"
               required
-              minLength={6}
+              minLength={mode === "register" ? 12 : undefined}
               type="password"
               value={form.password}
               onChange={handleChange}
               className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
-              placeholder="At least 6 characters"
+              placeholder={mode === "register" ? "At least 12 characters" : "Your password"}
             />
           </label>
 
@@ -263,18 +262,27 @@ type Opportunity = {
   source: string;
 };
 
+const API_BASE_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+
 async function apiRequest(path: string, options: RequestInit = {}) {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
     },
-    ...options,
   });
 
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (response.status === 502) {
+      const message = import.meta.env.PROD
+        ? "The sign-in service is temporarily unavailable. Please try again later."
+        : "The sign-in service is offline. Configure MySQL in .env, then start the API with npm run dev:server.";
+      throw new Error(message);
+    }
     throw new Error(payload.message || "Something went wrong.");
   }
 
@@ -342,6 +350,42 @@ const scholarshipPool = [
     source: "Fastweb",
     keywords: ["scholarship", "all", "general", "college", "aid", "financial", "major"],
   },
+  {
+    title: "Horatio Alger Scholarship",
+    type: "Scholarship" as const,
+    amount: "$10,000+",
+    description: "A scholarship program for students who have overcome adversity and demonstrated perseverance, leadership, and academic promise.",
+    forWho: "Students facing significant personal or financial obstacles who have shown resilience and leadership.",
+    process: "Apply by submitting academic records, financial information, and a personal statement describing your perseverance and goals.",
+    deadline: "Annual cycle",
+    link: "https://horatioalger.org/scholarships/",
+    source: "Horatio Alger Association",
+    keywords: ["resilience", "leadership", "need", "community", "service", "first-generation"],
+  },
+  {
+    title: "UNCF Scholarships",
+    type: "Scholarship" as const,
+    amount: "$500 to $10,000+",
+    description: "A collection of scholarships designed to support students from historically Black colleges and universities and underserved communities.",
+    forWho: "Students pursuing higher education with a focus on academic achievement, leadership, and community contribution.",
+    process: "Apply through the UNCF scholarship portal and provide school, academic, and financial information as required.",
+    deadline: "Varies by program",
+    link: "https://uncf.org/",
+    source: "UNCF",
+    keywords: ["minority", "community", "service", "academic", "need", "leadership"],
+  },
+  {
+    title: "QuestBridge National College Match",
+    type: "Scholarship" as const,
+    amount: "Full or partial aid packages",
+    description: "A college admission and scholarship match program connecting high-achieving, low-income students with selective colleges and financial support.",
+    forWho: "High-achieving low-income students who want access to affordable college options and support.",
+    process: "Complete the QuestBridge application, share academic and financial information, and match with participating schools.",
+    deadline: "Annual cycle",
+    link: "https://www.questbridge.org/",
+    source: "QuestBridge",
+    keywords: ["low-income", "need", "academic", "college", "financial", "first-generation"],
+  },
 ] as const;
 
 const financialAidPool = [
@@ -393,6 +437,54 @@ const financialAidPool = [
     source: "Federal Student Aid",
     keywords: ["need", "work", "part-time", "income", "financial"],
   },
+  {
+    title: "Federal Direct Subsidized Loans",
+    type: "Financial aid" as const,
+    amount: "Varies by year",
+    description: "Government-backed loans where the federal government pays interest while the student is in school at least half-time.",
+    forWho: "Undergraduate students with demonstrated financial need who need additional funding beyond grants.",
+    process: "File the FAFSA, then accept the offered loan through your school’s financial aid office or student portal.",
+    deadline: "Annual cycle",
+    link: "https://studentaid.gov/understand-aid/types/loans/subsidized-unsubsidized",
+    source: "Federal Student Aid",
+    keywords: ["loan", "need", "financial", "college", "aid", "federal"],
+  },
+  {
+    title: "Federal Direct Unsubsidized Loans",
+    type: "Financial aid" as const,
+    amount: "Varies by year",
+    description: "Federal loans available to students regardless of financial need, with interest accruing while in school.",
+    forWho: "Students who need additional funding for college and may not qualify for need-based grants alone.",
+    process: "Submit the FAFSA and accept the offered amount after reviewing your cost of attendance and aid package.",
+    deadline: "Annual cycle",
+    link: "https://studentaid.gov/understand-aid/types/loans/subsidized-unsubsidized",
+    source: "Federal Student Aid",
+    keywords: ["loan", "financial", "aid", "college", "federal", "income"],
+  },
+  {
+    title: "TEACH Grant",
+    type: "Financial aid" as const,
+    amount: "Up to $4,000",
+    description: "A federal grant for students who agree to teach in a high-need field at a low-income school after graduating.",
+    forWho: "Students pursuing teaching careers in high-need subjects or low-income schools.",
+    process: "Complete the FAFSA and meet the program requirements, then commit to the service obligation after graduation.",
+    deadline: "Annual cycle",
+    link: "https://studentaid.gov/understand-aid/types/grants/teach",
+    source: "Federal Student Aid",
+    keywords: ["teacher", "grant", "education", "financial", "aid", "need"],
+  },
+  {
+    title: "State Grant Programs",
+    type: "Financial aid" as const,
+    amount: "Varies by state",
+    description: "State-based award programs that provide need-based and merit-based assistance to in-state and out-of-state students.",
+    forWho: "Students attending college in or outside their home state, depending on the program’s requirements.",
+    process: "Check with your state higher education agency and fill out any required state aid application forms.",
+    deadline: "State-specific",
+    link: "https://www.ed.gov/",
+    source: "U.S. Department of Education",
+    keywords: ["state", "grant", "financial", "aid", "college", "need"],
+  },
 ] as const;
 
 export default function App() {
@@ -407,20 +499,16 @@ export default function App() {
     },
   ]);
   const [authError, setAuthError] = useState("");
-  const [users, setUsers] = useState<StoredUser[]>(() => getStoredUsers());
-  const [currentUser, setCurrentUser] = useState<StoredUser | null>(() => {
-    const savedSession = getStoredSession();
-    if (!savedSession) return null;
-    return getStoredUsers().find((user) => user.username.toLowerCase() === savedSession.toLowerCase()) ?? null;
-  });
+  const [currentUser, setCurrentUser] = useState<StoredUser | null>(null);
   const [isAdminMode, setIsAdminMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<"profile" | "newsletter">("profile");
+  const [activeTab, setActiveTab] = useState<"profile" | "newsletter" | "scholarships" | "financialAid">("profile");
   const [newsletters, setNewsletters] = useState<Array<{ id: number; title: string; summary: string; category: string; created_at: string; created_by: string }>>([]);
   const [adminNewsletters, setAdminNewsletters] = useState<any[]>([]);
   const [adminDraft, setAdminDraft] = useState({ title: "", summary: "", category: "General" });
   const [draftProfile, setDraftProfile] = useState<StudentProfile>(currentUser?.profile ?? profileDefaults);
   const [statusMessage, setStatusMessage] = useState("");
   const welcomed = useRef(false);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   async function loadNewsletters() {
     try {
@@ -432,7 +520,17 @@ export default function App() {
   }
 
   useEffect(() => {
+    clearLegacyAuthData();
     loadNewsletters();
+
+    apiRequest("/me")
+      .then((response) => {
+        const user = response.user;
+        setCurrentUser(user);
+        setIsAdminMode(Boolean(user.isAdmin));
+        setDraftProfile({ ...profileDefaults, ...(user.profile ?? {}) });
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -440,6 +538,15 @@ export default function App() {
       setDraftProfile(currentUser.profile);
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!chatOpen || !chatScrollRef.current) return;
+
+    chatScrollRef.current.scrollTo({
+      top: chatScrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [chatMessages, chatOpen]);
 
   useEffect(() => {
     if (welcomed.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -475,7 +582,7 @@ export default function App() {
 
   async function handleRegister({ fullName, username, password }: { fullName: string; username: string; password: string }) {
     try {
-      const response = await apiRequest("/register", {
+      await apiRequest("/register", {
         method: "POST",
         body: JSON.stringify({
           fullName,
@@ -490,14 +597,9 @@ export default function App() {
         }),
       });
 
-      const nextUsers = getStoredUsers();
-      setUsers(nextUsers);
       setAuthError("");
       setStatusMessage("Account created successfully. Please sign in to finish your profile.");
       setModal("login");
-      if (response.user) {
-        saveStoredSession(response.user.username);
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to register.";
       setAuthError(message);
@@ -506,12 +608,16 @@ export default function App() {
 
   async function handleLogin({ username, password }: { username: string; password: string }) {
     try {
-      if (username.toLowerCase() === "admin" && password === "admin123") {
-        const response = await apiRequest("/login", {
-          method: "POST",
-          body: JSON.stringify({ username, password }),
-        });
+      const response = await apiRequest("/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      const user = response.user;
+      setCurrentUser(user);
+      setDraftProfile({ ...profileDefaults, ...(user.profile ?? {}) });
+      setIsAdminMode(Boolean(user.isAdmin));
 
+      if (user.isAdmin) {
         let adminNewslettersList: any[] = [];
         try {
           const adminResponse = await apiRequest("/newsletters");
@@ -520,34 +626,11 @@ export default function App() {
           adminNewslettersList = [];
         }
 
-        setIsAdminMode(true);
         setAdminNewsletters(adminNewslettersList);
-        setCurrentUser(response.user ?? null);
-        setDraftProfile(profileDefaults);
-        setAuthError("");
-        setStatusMessage("Admin access granted.");
-        setModal(null);
-        return;
       }
 
-      const response = await apiRequest("/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password }),
-      });
-
-      const user = response.user;
-      const normalizedProfile = {
-        ...profileDefaults,
-        ...(user.profile ?? {}),
-        newsletters: Array.isArray(user.newsletters) ? user.newsletters : [],
-      };
-
-      setUsers(getStoredUsers());
-      setCurrentUser(user);
-      setDraftProfile(normalizedProfile);
       setAuthError("");
-      setStatusMessage(`Welcome back, ${user.username}!`);
-      saveStoredSession(user.username);
+      setStatusMessage(user.isAdmin ? "Admin access granted." : `Welcome back, ${user.username}!`);
       setModal(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to login.";
@@ -599,8 +682,6 @@ export default function App() {
       await apiRequest("/admin/newsletters", {
         method: "POST",
         body: JSON.stringify({
-          username: "admin",
-          password: "admin123",
           title: adminDraft.title,
           summary: adminDraft.summary,
           category: adminDraft.category,
@@ -618,13 +699,17 @@ export default function App() {
     }
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    try {
+      await apiRequest("/logout", { method: "POST" });
+    } catch {
+      // Clear local UI state even if the server is unavailable.
+    }
     setCurrentUser(null);
     setIsAdminMode(false);
     setAdminNewsletters([]);
     setDraftProfile(profileDefaults);
     setStatusMessage("You have been logged out.");
-    saveStoredSession(null);
   }
 
   function handleProfileChange(field: keyof StudentProfile, value: string | string[]) {
@@ -649,7 +734,7 @@ export default function App() {
     const isNeedBased = gpa >= 2.5 || school.length > 0 || Boolean(profile.ethnicity || profile.gender);
 
     const scoreOpportunity = (
-      item: { title: string; keywords: string[]; type: "Scholarship" | "Financial aid" },
+      item: { title: string; keywords: readonly string[]; type: "Scholarship" | "Financial aid" },
       interestBoost: number,
     ) => {
       let match = 62;
@@ -1002,13 +1087,27 @@ export default function App() {
                   {currentUser.username}&apos;s profile
                 </h1>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   className={`rounded-full px-4 py-2 text-sm font-extrabold ${activeTab === "profile" ? "bg-[#07345e] text-white" : "bg-white text-[#07345e]"}`}
                   onClick={() => setActiveTab("profile")}
                 >
                   Profile
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-full px-4 py-2 text-sm font-extrabold ${activeTab === "scholarships" ? "bg-[#0878c9] text-white" : "bg-white text-[#07345e]"}`}
+                  onClick={() => setActiveTab("scholarships")}
+                >
+                  Scholarships
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-full px-4 py-2 text-sm font-extrabold ${activeTab === "financialAid" ? "bg-[#cf334a] text-white" : "bg-white text-[#07345e]"}`}
+                  onClick={() => setActiveTab("financialAid")}
+                >
+                  Financial aid
                 </button>
                 <button
                   type="button"
@@ -1229,6 +1328,80 @@ export default function App() {
                 </section>
               </div>
             </>
+          ) : activeTab === "scholarships" ? (
+            <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Scholarships</p>
+                  <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">Opportunities matched for you</h2>
+                </div>
+                <button type="button" onClick={() => setActiveTab("profile")} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-[#07345e]">
+                  Back to profile
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {getRecommendations(draftProfile)
+                  .filter((item) => item.type === "Scholarship")
+                  .map((item) => (
+                    <button
+                      key={item.title}
+                      type="button"
+                      onClick={() => setSelectedOpportunity(item)}
+                      className="w-full rounded-[1.5rem] border border-blue-100 bg-[#f9fbff] p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#0878c9] hover:shadow-md"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
+                          <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
+                        </div>
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-extrabold text-emerald-700">{item.match}% match</span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
+                        <span className="text-sm font-bold text-[#0878c9]">View details</span>
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </section>
+          ) : activeTab === "financialAid" ? (
+            <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Financial aid</p>
+                  <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">Support options for you</h2>
+                </div>
+                <button type="button" onClick={() => setActiveTab("profile")} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-[#07345e]">
+                  Back to profile
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {getRecommendations(draftProfile)
+                  .filter((item) => item.type === "Financial aid")
+                  .map((item) => (
+                    <button
+                      key={item.title}
+                      type="button"
+                      onClick={() => setSelectedOpportunity(item)}
+                      className="w-full rounded-[1.5rem] border border-red-100 bg-[#fff9f9] p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#cf334a] hover:shadow-md"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
+                          <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
+                        </div>
+                        <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-extrabold text-[#cf334a]">{item.match}% match</span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
+                        <span className="text-sm font-bold text-[#0878c9]">View details</span>
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </section>
           ) : (
             <>
               <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
@@ -1262,93 +1435,6 @@ export default function App() {
             </>
           )}
 
-          <section className="mt-10 rounded-[2rem] border border-blue-100 bg-[#f7fbff] p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">
-                  Liberty AI
-                </p>
-                <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">
-                  Personalized opportunities for you
-                </h2>
-              </div>
-              <div className="rounded-full bg-white px-4 py-2 text-sm font-extrabold text-[#0878c9] shadow-sm">
-                Based on your profile
-              </div>
-            </div>
-
-            <div className="mt-8 grid gap-6 lg:grid-cols-2">
-              <div>
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-xl font-black text-[#07345e]">Scholarships from AI</h3>
-                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-extrabold text-[#0878c9]">
-                    {getRecommendations(draftProfile).filter((item) => item.type === "Scholarship").length} picks
-                  </span>
-                </div>
-                <div className="space-y-4">
-                  {getRecommendations(draftProfile)
-                    .filter((item) => item.type === "Scholarship")
-                    .map((item) => (
-                      <button
-                        key={item.title}
-                        type="button"
-                        onClick={() => setSelectedOpportunity(item)}
-                        className="w-full rounded-[1.5rem] border border-blue-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#0878c9] hover:shadow-md"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
-                            <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
-                          </div>
-                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-extrabold text-emerald-700">
-                            {item.match}% match
-                          </span>
-                        </div>
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
-                          <span className="text-sm font-bold text-[#0878c9]">View details</span>
-                        </div>
-                      </button>
-                    ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-xl font-black text-[#07345e]">Financial aid</h3>
-                  <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-extrabold text-[#cf334a]">
-                    {getRecommendations(draftProfile).filter((item) => item.type === "Financial aid").length} options
-                  </span>
-                </div>
-                <div className="space-y-4">
-                  {getRecommendations(draftProfile)
-                    .filter((item) => item.type === "Financial aid")
-                    .map((item) => (
-                      <button
-                        key={item.title}
-                        type="button"
-                        onClick={() => setSelectedOpportunity(item)}
-                        className="w-full rounded-[1.5rem] border border-red-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#cf334a] hover:shadow-md"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
-                            <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
-                          </div>
-                          <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-extrabold text-[#cf334a]">
-                            {item.match}% match
-                          </span>
-                        </div>
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
-                          <span className="text-sm font-bold text-[#0878c9]">View details</span>
-                        </div>
-                      </button>
-                    ))}
-                </div>
-              </div>
-            </div>
-          </section>
         </main>
       ) : (
         <main>
@@ -1623,22 +1709,26 @@ export default function App() {
         </div>
       </footer>
 
-      <div className="fixed bottom-5 right-5 z-40">
+      <div className="fixed bottom-4 right-4 z-40 sm:bottom-5 sm:right-5">
         {chatOpen && (
-          <div className="mb-3 w-[min(390px,calc(100vw-40px))] rounded-2xl border border-blue-100 bg-white p-5 shadow-2xl">
-            <div className="flex items-start justify-between">
+          <div className="mb-3 w-[min(390px,calc(100vw-24px))] rounded-2xl border border-blue-100 bg-white p-4 shadow-2xl sm:p-5">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-extrabold text-[#07345e]">ScholarPath guide</p>
                 <p className="mt-1 text-sm text-slate-500">Your free eagle buddy</p>
               </div>
-              <button aria-label="Close chat" className="text-slate-400" onClick={() => setChatOpen(false)}>
+              <button
+                aria-label="Close chat"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-700"
+                onClick={() => setChatOpen(false)}
+              >
                 <Icon className="h-4 w-4">
                   <path d="m6 6 12 12M18 6 6 18" />
                 </Icon>
               </button>
             </div>
 
-            <div className="mt-5 max-h-72 space-y-3 overflow-y-auto pr-1">
+            <div ref={chatScrollRef} className="mt-5 max-h-[60vh] space-y-3 overflow-y-auto pr-1 sm:max-h-72">
               {chatMessages.map((message, index) => (
                 <div
                   key={`${message.role}-${index}`}
@@ -1706,6 +1796,7 @@ export default function App() {
           className="ml-auto flex h-14 items-center gap-2 rounded-full bg-[#07345e] px-5 font-extrabold text-white shadow-xl transition hover:-translate-y-0.5"
           onClick={() => setChatOpen((open) => !open)}
           aria-expanded={chatOpen}
+          aria-label="Toggle Liberty AI helper"
         >
           <Icon className="h-5 w-5">
             <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" />
