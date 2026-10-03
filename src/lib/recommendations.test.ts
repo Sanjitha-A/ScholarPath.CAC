@@ -36,4 +36,23 @@ describe("profile-based opportunity matching", () => {
     expect(getProfileRecommendations(serviceProfile, scholarships, financialAid)[0].title).toBe("Community Service Award");
     expect(getProfileRecommendations(demographicOnlyProfile, scholarships, financialAid)).toEqual([]);
   });
+
+  it("returns up to seven relevant opportunities in each category", () => {
+    const profile = { ...profileDefaults, gpa: "3.9", apCount: "8" };
+    const manyScholarships = Array.from({ length: 9 }, (_, index) => ({
+      title: `Academic scholarship ${index + 1}`,
+      type: "Scholarship" as const,
+      keywords: ["academic", "gpa", "merit"],
+    }));
+    const manyAidOptions = Array.from({ length: 9 }, (_, index) => ({
+      title: `General aid option ${index + 1}`,
+      type: "Financial aid" as const,
+      keywords: ["all", "general", "financial aid"],
+    }));
+
+    const results = getProfileRecommendations(profile, manyScholarships, manyAidOptions);
+
+    expect(results.filter((item) => item.type === "Scholarship")).toHaveLength(7);
+    expect(results.filter((item) => item.type === "Financial aid")).toHaveLength(7);
+  });
 });

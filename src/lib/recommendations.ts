@@ -58,11 +58,10 @@ export function getProfileRecommendations<T extends OpportunityCandidate>(
 
       return { item, match: Math.min(score, 96) };
     })
-    .filter(({ match }) => match >= 35)
     .sort((left, right) => right.match - left.match)
     .reduce<Array<T & { match: number }>>((matches, { item, match }) => {
       const categoryMatches = matches.filter((candidate) => candidate.type === item.type).length;
-      if (categoryMatches < 3) matches.push({ ...item, match });
+      if (categoryMatches < 7) matches.push({ ...item, match });
       return matches;
     }, []);
 }
