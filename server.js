@@ -60,11 +60,11 @@ async function ensureDatabase() {
   if (!adminPassword || !sessionSecret) {
     throw new Error('Set ADMIN_PASSWORD and SESSION_SECRET in .env before starting the API.');
   }
-  if (!/^[A-Za-z0-9_]+$/.test(dbConfig.database)) {
-    throw new Error('MYSQL_DATABASE must contain only letters, numbers, or underscores.');
-  }
   if (sessionSecret.length < 32) {
     throw new Error('SESSION_SECRET must be at least 32 characters long.');
+  }
+  if (!/^[A-Za-z0-9_]+$/.test(dbConfig.database)) {
+    throw new Error('MYSQL_DATABASE must contain only letters, numbers, or underscores.');
   }
   if (isProduction && !dbConfig.password) {
     throw new Error('Production deployments require a password for MYSQL_USER.');
@@ -154,7 +154,7 @@ function verifyPassword(value, encoded) {
 
 function createSessionToken(user) {
   const payload = Buffer.from(JSON.stringify({
-    userId: user.id,
+    userId: String(user.id ?? user._id),
     expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
   })).toString('base64url');
   const signature = crypto.createHmac('sha256', sessionSecret).update(payload).digest('base64url');
@@ -186,7 +186,7 @@ function setSessionCookie(res, user) {
   res.cookie(sessionCookieName, createSessionToken(user), {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: isProduction ? 'none' : 'lax',
     maxAge: sessionDurationMs,
     path: '/',
   });
@@ -196,13 +196,14 @@ function clearSessionCookie(res) {
   res.clearCookie(sessionCookieName, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: isProduction ? 'none' : 'lax',
     path: '/',
   });
 }
 
 function jsonSafe(value, fallback = {}) {
   try {
+    if (value && typeof value === 'object') return value;
     return value ? JSON.parse(value) : fallback;
   } catch {
     return fallback;
@@ -248,7 +249,7 @@ app.use(helmet({
       objectSrc: ["'none'"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", 'https:'],
     },
   },
 }));

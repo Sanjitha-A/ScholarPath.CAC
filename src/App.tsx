@@ -2,10 +2,13 @@ import confetti from "canvas-confetti";
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import {
   clearLegacyAuthData,
+  normalizeStudentProfile,
   profileDefaults,
   StoredUser,
   StudentProfile,
 } from "./lib/auth";
+import { demoApiRequest } from "./lib/demoDatabase";
+import { getProfileRecommendations } from "./lib/recommendations";
 import scholarPathLogo from "./imports/scholarpath-logo.png";
 
 const heroImage =
@@ -262,31 +265,8 @@ type Opportunity = {
   source: string;
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
-
 async function apiRequest(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
-  });
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    if (response.status === 502) {
-      const message = import.meta.env.PROD
-        ? "The sign-in service is temporarily unavailable. Please try again later."
-        : "The sign-in service is offline. Configure MySQL in .env, then start the API with npm run dev:server.";
-      throw new Error(message);
-    }
-    throw new Error(payload.message || "Something went wrong.");
-  }
-
-  return payload;
+  return demoApiRequest(path, options);
 }
 
 const scholarshipPool = [
@@ -528,14 +508,14 @@ export default function App() {
         const user = response.user;
         setCurrentUser(user);
         setIsAdminMode(Boolean(user.isAdmin));
-        setDraftProfile({ ...profileDefaults, ...(user.profile ?? {}) });
+        setDraftProfile(normalizeStudentProfile(user.profile));
       })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
     if (currentUser) {
-      setDraftProfile(currentUser.profile);
+      setDraftProfile(normalizeStudentProfile(currentUser.profile));
     }
   }, [currentUser]);
 
@@ -614,7 +594,7 @@ export default function App() {
       });
       const user = response.user;
       setCurrentUser(user);
-      setDraftProfile({ ...profileDefaults, ...(user.profile ?? {}) });
+      setDraftProfile(normalizeStudentProfile(user.profile));
       setIsAdminMode(Boolean(user.isAdmin));
 
       if (user.isAdmin) {
@@ -658,12 +638,9 @@ export default function App() {
       });
 
       const user = response.user;
-      setCurrentUser(user);
-      setDraftProfile({
-        ...profileDefaults,
-        ...(user.profile ?? {}),
-        newsletters: Array.isArray(user.newsletters) ? user.newsletters : [],
-      });
+      const profile = normalizeStudentProfile(user.profile);
+      setCurrentUser({ ...user, profile });
+      setDraftProfile(profile);
       setStatusMessage("Profile saved successfully.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Profile save failed.";
@@ -720,69 +697,7 @@ export default function App() {
   }
 
   function getRecommendations(profile: StudentProfile): Opportunity[] {
-    const gpa = Number(profile.gpa || 0);
-    const apCount = Number(profile.apCount || 0);
-    const major = (profile.major || "").toLowerCase();
-    const interests = (profile.interests || "").toLowerCase();
-    const school = (profile.school || "").toLowerCase();
-    const combinedText = `${major} ${interests} ${profile.ethnicity || ""} ${profile.gender || ""} ${school}`.toLowerCase();
-    const isStem = ["science", "math", "engineering", "tech", "computer", "health", "medicine", "biology"]
-      .some((keyword) => combinedText.includes(keyword));
-    const isCommunity = ["community", "leadership", "service", "volunteer", "impact"].some((keyword) =>
-      combinedText.includes(keyword),
-    );
-    const isNeedBased = gpa >= 2.5 || school.length > 0 || Boolean(profile.ethnicity || profile.gender);
-
-    const scoreOpportunity = (
-      item: { title: string; keywords: readonly string[]; type: "Scholarship" | "Financial aid" },
-      interestBoost: number,
-    ) => {
-      let match = 62;
-      const haystack = `${item.title} ${item.keywords.join(" ")}`.toLowerCase();
-
-      if (gpa >= 3.8) match += 12;
-      else if (gpa >= 3.0) match += 8;
-      else if (gpa >= 2.5) match += 4;
-
-      if (apCount >= 5) match += 8;
-      if (profile.school) match += 4;
-      if (isNeedBased && item.type === "Financial aid") match += 10;
-      if (isStem && item.keywords.some((keyword) => ["stem", "health", "technology", "computer", "science", "biology", "engineering"].includes(keyword))) match += 10;
-      if (isCommunity && item.keywords.some((keyword) => ["leadership", "service", "community", "volunteer"].includes(keyword))) match += 8;
-      if (item.keywords.some((keyword) => combinedText.includes(keyword))) match += interestBoost;
-      if (haystack.includes("all") || haystack.includes("general")) match += 4;
-      if (match > 96) match = 96;
-
-      return match;
-    };
-
-    const scholarshipItems = scholarshipPool.map((item) => ({
-      ...item,
-      match: scoreOpportunity(item, 8),
-    }));
-
-    const financialAidItems = financialAidPool.map((item) => ({
-      ...item,
-      match: scoreOpportunity(item, 7),
-    }));
-
-    const rankedScholarships = [...scholarshipItems]
-      .sort((a, b) => b.match - a.match)
-      .slice(0, 3)
-      .map((item) => ({
-        ...item,
-        type: "Scholarship" as const,
-      }));
-
-    const rankedAid = [...financialAidItems]
-      .sort((a, b) => b.match - a.match)
-      .slice(0, 3)
-      .map((item) => ({
-        ...item,
-        type: "Financial aid" as const,
-      }));
-
-    return [...rankedScholarships, ...rankedAid].map((item) => ({
+    return getProfileRecommendations(profile, scholarshipPool, financialAidPool).map((item) => ({
       title: item.title,
       type: item.type,
       amount: item.amount,
@@ -917,6 +832,10 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-bold text-amber-900">
+        DEMO ONLY · Use sample information; data is stored only in this browser.
+      </div>
 
       {isAdminMode ? (
         <main className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
@@ -1334,6 +1253,7 @@ export default function App() {
                 <div>
                   <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Scholarships</p>
                   <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">Opportunities matched for you</h2>
+                  <p className="mt-2 text-sm text-slate-500">Demo estimates from your academic profile and the built-in catalog. Confirm eligibility and deadlines with each provider.</p>
                 </div>
                 <button type="button" onClick={() => setActiveTab("profile")} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-[#07345e]">
                   Back to profile
@@ -1341,7 +1261,9 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                {getRecommendations(draftProfile)
+                {getRecommendations(draftProfile).filter((item) => item.type === "Scholarship").length === 0 ? (
+                  <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Add your GPA, AP count, intended major, or interests in your profile to see relevant matches.</p>
+                ) : getRecommendations(draftProfile)
                   .filter((item) => item.type === "Scholarship")
                   .map((item) => (
                     <button
@@ -1355,7 +1277,7 @@ export default function App() {
                           <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
                           <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
                         </div>
-                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-extrabold text-emerald-700">{item.match}% match</span>
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-extrabold text-emerald-700">{item.match}% profile fit</span>
                       </div>
                       <div className="mt-3 flex items-center justify-between gap-3">
                         <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
@@ -1371,6 +1293,7 @@ export default function App() {
                 <div>
                   <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Financial aid</p>
                   <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">Support options for you</h2>
+                  <p className="mt-2 text-sm text-slate-500">Demo estimates from your academic profile and the built-in catalog. Confirm eligibility and deadlines with each provider.</p>
                 </div>
                 <button type="button" onClick={() => setActiveTab("profile")} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-[#07345e]">
                   Back to profile
@@ -1378,7 +1301,9 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                {getRecommendations(draftProfile)
+                {getRecommendations(draftProfile).filter((item) => item.type === "Financial aid").length === 0 ? (
+                  <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Add your GPA, AP count, intended major, or interests in your profile to see relevant options.</p>
+                ) : getRecommendations(draftProfile)
                   .filter((item) => item.type === "Financial aid")
                   .map((item) => (
                     <button
@@ -1392,7 +1317,7 @@ export default function App() {
                           <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
                           <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
                         </div>
-                        <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-extrabold text-[#cf334a]">{item.match}% match</span>
+                        <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-extrabold text-[#cf334a]">{item.match}% profile fit</span>
                       </div>
                       <div className="mt-3 flex items-center justify-between gap-3">
                         <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>

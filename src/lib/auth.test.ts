@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearLegacyAuthData, SESSION_KEY, STORAGE_KEY } from "./auth";
+import {
+  clearLegacyAuthData,
+  normalizeStudentProfile,
+  SESSION_KEY,
+  STORAGE_KEY,
+} from "./auth";
 
 describe("ScholarPath session storage", () => {
   const values = new Map<string, string>();
@@ -26,5 +31,16 @@ describe("ScholarPath session storage", () => {
     expect(values.has(STORAGE_KEY)).toBe(false);
     expect(values.has(SESSION_KEY)).toBe(false);
     expect(values.has("scholarpath_token_v1")).toBe(false);
+  });
+});
+
+describe("student profile normalization", () => {
+  it("keeps form fields controlled when stored profiles are incomplete", () => {
+    const profile = normalizeStudentProfile({ ethnicity: undefined, gpa: "3.8" });
+
+    expect(profile.ethnicity).toBe("");
+    expect(profile.gender).toBe("");
+    expect(profile.gpa).toBe("3.8");
+    expect(profile.newsletters).toEqual([]);
   });
 });

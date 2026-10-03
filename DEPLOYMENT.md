@@ -1,36 +1,25 @@
 # Public Deployment
 
-ScholarPath runs as one web service: Express serves the built Vite app and the `/api` routes from the same origin. Deploy the included Dockerfile to a host that supports Docker and configure a persistent MySQL database separately. Do not expose MySQL publicly without network restrictions and TLS.
+ScholarPath uses an Express API and MySQL for persistent accounts, student profiles, and newsletters. GitHub Pages hosts the frontend; the API connects to a hosted MySQL server. MySQL Workbench is a client for administering that server, not the public database host.
 
-## Required environment
+## Local MySQL Workbench
 
-Set these as secret environment variables in the deployment provider, not in Git:
+Create a database named `scholarpath`, then create the `users` and `newsletters` tables using the SQL in the setup instructions. Create a least-privilege user named `scholarpath_app` and grant it access to this database. Set local `.env` values for `MYSQL_HOST=127.0.0.1`, `MYSQL_PORT=3306`, `MYSQL_USER=scholarpath_app`, `MYSQL_PASSWORD`, `MYSQL_DATABASE=scholarpath`, and `MYSQL_SSL=false`.
+
+Run `npm run dev:server` to start the API. It creates or upgrades the tables and admin record at startup. The API stores password hashes in `password_hash`; it does not store plain-text passwords. Student fields such as ethnicity, gender, age, GPA, and AP count are stored in the `profile` JSON column.
+
+## Public deployment
+
+For a public website, create a hosted MySQL instance and a restricted database user there. Do not point Render at `localhost`; that would refer to Render's own machine. Set these as secrets/environment values on the API host:
 
 - `NODE_ENV=production`
-- `PORT` to the port supplied by the host (if required)
-- `VITE_API_URL` to the public API origin used by the web frontend (for example `https://api.example.com`)
-- `ALLOWED_ORIGINS` to the allowed frontend domains, such as `https://app.example.com`
 - `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE`
-- `MYSQL_SSL=true`; add `MYSQL_SSL_CA` if the provider requires its CA certificate
+- `MYSQL_SSL=true` and `MYSQL_SSL_CA` if the provider requires its CA
 - `ADMIN_USERNAME=admin`
-- `ADMIN_PASSWORD` to a unique password at least 16 characters long; `admin123` is rejected in production
+- `ADMIN_PASSWORD` to a unique password of at least 16 characters
 - `SESSION_SECRET` to a random secret of at least 32 characters
-- `TRUST_PROXY=1` when the host terminates HTTPS through one trusted proxy
+- `ALLOWED_ORIGINS` and `PUBLIC_FRONTEND_URL` to the exact public frontend origin
 
-The production API refuses to start without database credentials, MySQL TLS, and a strong admin password. Use a MySQL user scoped only to the `scholarpath` schema. The API creates/upgrades the two application tables at startup, so the DB account needs `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE`, and `ALTER` on that schema.
+Use the included `render.yaml` for the API template. Set the health check path to `/api/health`. In GitHub, enable Pages with GitHub Actions and add repository secret `VITE_API_URL` with the public API origin. After Pages gives you the final site URL, configure it in the API's allowed-origin values.
 
-Generate a session secret locally with `openssl rand -hex 32`. Never commit `.env`, deployment secrets, or database backups.
-
-## Build and run
-
-The deployment host should build the image from the repository and run it with the environment variables above. The container exposes port `3001`; configure the provider to route public HTTPS traffic to that port. Set its health check to `GET /api/health`, which verifies the database connection too. Keep the web service and database in the same region when possible.
-
-Run one application instance while using the default in-memory login/register rate limiter. Horizontal scaling requires a shared rate-limit store. The database must provide persistent storage and automated backups; ephemeral database containers are not suitable.
-
-## Go-live checklist
-
-- Configure HTTPS and a real public host name. The session cookie is `Secure` in production.
-- Confirm the provider has persistent MySQL, TLS, backups, and an acceptable restore plan.
-- Publish a real privacy notice and contact address, explain collection/use/retention of account and profile data, and review applicable rules for minors and sensitive demographic data (including ethnicity and gender). This repository cannot certify legal compliance or invent the service operator's policy.
-- Test registration, login, profile save, logout, admin newsletter creation, restart persistence, and database restore against the hosted deployment before sharing it publicly.
-- Use a unique production admin password; do not reuse the local development password.
+Test registration, login, profile save, logout, admin newsletter creation, persistence after restart, and restore from backup before sharing publicly. Never commit `.env` or database secrets. Publish a real privacy notice and review rules for collecting student profile information, including ethnicity and gender.

@@ -3,8 +3,8 @@ services:
     name: scholarpath-api
     env: node
     plan: free
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: npx --yes pnpm@12.6.0 install --frozen-lockfile
+    startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
@@ -13,7 +13,7 @@ services:
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD
-        generateValue: true
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       - key: MYSQL_HOST
@@ -25,7 +25,7 @@ services:
       - key: MYSQL_PASSWORD
         sync: false
       - key: MYSQL_DATABASE
-        sync: false
+        value: scholarpath
       - key: MYSQL_SSL
         value: true
       - key: ALLOWED_ORIGINS

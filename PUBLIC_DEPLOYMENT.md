@@ -1,64 +1,18 @@
-# Public deployment setup
+# ScholarPath Demo Deployment
 
-This app is designed to deploy in two parts:
+This version is for demonstration only. The app uses a fake browser-local database and makes no API requests. Each browser has its own isolated accounts, profiles, and newsletters; clearing that browser's site data resets the demo. Do not enter real student or personal information.
 
-- GitHub Pages hosts the static frontend
-- a separate backend host runs the Express API and keeps the database connection
+## Deploy on Vercel
 
-## 1) Frontend on GitHub Pages
+1. Import the GitHub repository into Vercel.
+2. Keep the detected Vite framework settings. The included `vercel.json` sets the build command to `pnpm run build` and output directory to `dist`.
+3. Deploy. No API URL, database credentials, or environment variables are required for this demo.
 
-1. Push the repo to GitHub.
-2. Open GitHub repository settings.
-3. Go to Pages.
-4. Set source to GitHub Actions.
-5. The workflow in `.github/workflows/deploy-pages.yml` will build and deploy the site.
+Only a demo admin account is preloaded so the newsletter manager can be shown:
 
-Set this repository secret:
+- Username: `admin`
+- Password: `ScholarPathAdminDemo2026!`
 
-- `VITE_API_URL=https://your-api-domain.com`
+No student accounts or newsletters are preloaded. Use **Get started** to register a student account, then log in with the credentials you created. Accounts and profile edits are stored only in the current browser. This is not secure authentication or shared cloud storage and must not be used for real accounts.
 
-This should point to your deployed backend origin.
-
-## 2) Backend on Render
-
-Create a Render web service from this repository, or use the included `render.yaml` file.
-
-Required environment variables:
-
-- `NODE_ENV=production`
-- `PORT=3001`
-- `MYSQL_HOST=...`
-- `MYSQL_PORT=3306`
-- `MYSQL_USER=...`
-- `MYSQL_PASSWORD=...`
-- `MYSQL_DATABASE=...`
-- `MYSQL_SSL=true`
-- `ADMIN_USERNAME=admin`
-- `ADMIN_PASSWORD=your-very-long-production-password`
-- `SESSION_SECRET=your-long-random-session-secret`
-- `ALLOWED_ORIGINS=https://your-github-pages-domain.com`
-- `PUBLIC_FRONTEND_URL=https://your-github-pages-domain.com`
-
-The backend will create the required MySQL tables automatically on startup.
-
-## 3) Database
-
-Use a managed MySQL service. Example providers:
-
-- Railway MySQL
-- PlanetScale
-- Render MySQL
-- a managed Azure/MySQL host
-
-The database must be a real persistent MySQL instance; local SQLite or purely local-only storage is not enough for a public app.
-
-## 4) How sign-in works in production
-
-- The frontend sends auth requests to the public backend URL.
-- The backend checks credentials against the MySQL users table.
-- The backend creates a secure HTTP-only session cookie.
-- Profile and newsletter data persist in MySQL.
-
-## 5) Important
-
-GitHub Pages cannot handle user login, session management, or database access directly. It is only the frontend host. The backend must remain on a separate public service.
+For a later production release with the MySQL API, use the separate checklist in `DEPLOYMENT.md` and replace the demo store with the hosted API configuration.
