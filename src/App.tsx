@@ -24,7 +24,7 @@ const stories = [
   },
   {
     image:
-      "https://images.unsplash.com/photo-1590012314607-cda9d9b699ae?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&ixlib=rb-4.1.0&q=80&w=700",
+      "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=700&q=80",
     quote:
       "The deadline reminders and financial aid guide made the whole process feel manageable.",
     name: "Jordan, First-generation student",
@@ -833,10 +833,6 @@ export default function App() {
         </div>
       </header>
 
-      <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-bold text-amber-900">
-        DEMO ONLY · Use sample information; data is stored only in this browser.
-      </div>
-
       {isAdminMode ? (
         <main className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
           <div className="mb-6 rounded-[1.75rem] border border-red-100 bg-red-50 p-5 shadow-lg shadow-red-100/60">
@@ -1579,8 +1575,8 @@ export default function App() {
             </div>
             <div className="mt-12 grid gap-6 lg:grid-cols-2">
               {stories.map((story) => (
-                <article className="grid overflow-hidden rounded-[1.75rem] bg-[#eff8ff] sm:grid-cols-[.8fr_1.2fr]" key={story.name}>
-                  <img className="h-64 w-full object-cover sm:h-full" src={story.image} alt="" />
+                <article className="grid overflow-hidden rounded-[1.75rem] bg-[#eff8ff] sm:h-[510px] sm:grid-cols-[.8fr_1.2fr]" key={story.name}>
+                  <img className="h-64 w-full object-cover sm:h-[510px]" src={story.image} alt="" />
                   <div className="flex flex-col justify-center p-7 sm:p-9">
                     <span className="text-5xl font-black leading-none text-[#cf334a]">“</span>
                     <blockquote className="-mt-3 text-xl font-bold leading-8 text-[#07345e]">
