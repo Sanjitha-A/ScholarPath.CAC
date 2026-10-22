@@ -40,7 +40,12 @@ describe("student profile normalization", () => {
 
     expect(profile.ethnicity).toBe("");
     expect(profile.gender).toBe("");
+    expect(profile.grade).toBe("");
     expect(profile.gpa).toBe("3.8");
     expect(profile.newsletters).toEqual([]);
+  });
+
+  it("preserves the selected grade level", () => {
+    expect(normalizeStudentProfile({ grade: "11" }).grade).toBe("11");
   });
 });

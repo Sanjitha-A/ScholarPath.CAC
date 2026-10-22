@@ -1263,6 +1263,21 @@ export default function App() {
                       </label>
 
                       <label className="block text-sm font-bold text-slate-700">
+                        Current Grade Level
+                        <select
+                          value={draftProfile.grade ?? ""}
+                          onChange={(event) => handleProfileChange("grade", event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                        >
+                          <option value="">Select your grade</option>
+                          <option value="9">9th Grade (Freshman)</option>
+                          <option value="10">10th Grade (Sophomore)</option>
+                          <option value="11">11th Grade (Junior)</option>
+                          <option value="12">12th Grade (Senior)</option>
+                        </select>
+                      </label>
+
+                      <label className="block text-sm font-bold text-slate-700">
                         GPA
                         <input
                           type="number"

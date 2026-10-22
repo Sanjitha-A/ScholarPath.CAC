@@ -9,6 +9,7 @@ export type StudentProfile = {
   graduationYear?: string;
   interests?: string;
   newsletters?: string[];
+  grade?: string;
 };
 
 export type StoredUser = {
@@ -24,6 +25,7 @@ export const profileDefaults: StudentProfile = {
   ethnicity: "",
   gender: "",
   age: "",
+  grade: "",
   gpa: "",
   apCount: "",
   school: "",
@@ -42,6 +44,7 @@ export function normalizeStudentProfile(value: unknown): StudentProfile {
     ethnicity: typeof profile.ethnicity === "string" ? profile.ethnicity : "",
     gender: typeof profile.gender === "string" ? profile.gender : "",
     age: typeof profile.age === "string" ? profile.age : "",
+    grade: typeof profile.grade === "string" ? profile.grade : "",
     gpa: typeof profile.gpa === "string" ? profile.gpa : "",
     apCount: typeof profile.apCount === "string" ? profile.apCount : "",
     school: typeof profile.school === "string" ? profile.school : "",
