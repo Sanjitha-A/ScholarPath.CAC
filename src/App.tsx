@@ -1,5 +1,5 @@
 import confetti from "canvas-confetti";
-import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   clearLegacyAuthData,
   normalizeStudentProfile,
@@ -8,11 +8,27 @@ import {
   StudentProfile,
 } from "./lib/auth";
 import { demoApiRequest } from "./lib/demoDatabase";
-import { getProfileRecommendations } from "./lib/recommendations";
-import scholarPathLogo from "./imports/scholarpath-logo.png";
-
+import {
+  buildRoadmapTasks,
+  calculateEstimatedFundingGap,
+  getNextBestStep,
+  roadmapLearningGuides,
+  roadmapProfileDefaults,
+  type RoadmapProfile,
+  type RoadmapTask,
+  type RoadmapTaskStatus,
+} from "./lib/fundingRoadmap";
+import { getEligibilityAssessment, getProfileRecommendations, getRecommendationReasons } from "./lib/recommendations";
 const heroImage =
   "https://images.unsplash.com/photo-1758270705317-3ef6142d306f?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&ixlib=rb-4.1.0&q=85&w=1400";
+
+const usStates = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "District of Columbia",
+  "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine",
+  "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+  "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
+  "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+];
 
 const stories = [
   {
@@ -54,52 +70,26 @@ function Icon({
   );
 }
 
-function EagleBuddy({ className = "h-20 w-20" }: { className?: string }) {
-  return (
-    <svg
-      aria-label="Liberty, the ScholarPath eagle buddy"
-      className={className}
-      role="img"
-      viewBox="0 0 96 96"
-    >
-      <circle cx="48" cy="48" r="45" fill="#EAF5FF" stroke="#0878C9" strokeWidth="3" />
-      <path d="M25 58C16 57 11 51 10 42c8 0 15 3 20 9l-5 7Z" fill="#9BBAD4" />
-      <path d="M71 58c9-1 14-7 15-16-8 0-15 3-20 9l5 7Z" fill="#9BBAD4" />
-      <path d="M27 40c0-17 9-27 21-27s21 10 21 27v19c0 15-9 25-21 25S27 74 27 59V40Z" fill="#0B4779" />
-      <path
-        d="M29 40c2-16 9-25 19-25s17 9 19 25l-7-5-5 5-7-5-7 5-5-5-7 5Z"
-        fill="#FFFFFF"
-      />
-      <path d="M28 43c2-5 7-8 12-8h16c5 0 10 3 12 8v12c-3 8-10 12-20 12S31 63 28 55V43Z" fill="#FFFFFF" />
-      <circle cx="40" cy="47" r="4.5" fill="#07345E" />
-      <circle cx="56" cy="47" r="4.5" fill="#07345E" />
-      <circle cx="41.5" cy="45.5" r="1.2" fill="#FFFFFF" />
-      <circle cx="57.5" cy="45.5" r="1.2" fill="#FFFFFF" />
-      <path d="m48 49 10 5-10 8-10-8 10-5Z" fill="#F2B84B" stroke="#D9951E" strokeWidth="1.5" />
-      <path d="M30 64h36v12c-4 6-10 9-18 9s-14-3-18-9V64Z" fill="#FFFFFF" />
-      <path d="M31 70h34v4H31z" fill="#D83A4A" />
-      <path d="M45 64h6v21h-6z" fill="#A9C7DF" />
-      <path d="M20 38c0-11 6-18 14-18M76 38c0-11-6-18-14-18" fill="none" stroke="#5F86A7" strokeWidth="4" strokeLinecap="round" />
-      <rect x="17" y="36" width="9" height="15" rx="4.5" fill="#5F86A7" />
-      <rect x="70" y="36" width="9" height="15" rx="4.5" fill="#5F86A7" />
-      <path d="M77 49c5 2 6 6 3 10h-7" fill="none" stroke="#5F86A7" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="71" cy="59" r="3" fill="#D83A4A" />
-    </svg>
-  );
-}
-
 function AppModal({
   mode,
   onClose,
   onRegister,
   onLogin,
+  onModeChange,
+  onForgotPassword,
+  onResetPassword,
+  resetToken,
   errorMessage,
   helperMessage,
 }: {
-  mode: "register" | "login";
+  mode: "register" | "login" | "forgot" | "reset";
   onClose: () => void;
-  onRegister: (details: { fullName: string; username: string; password: string }) => void;
+  onRegister: (details: { fullName: string; username: string; email: string; password: string }) => void;
   onLogin: (details: { username: string; password: string }) => void;
+  onModeChange: (mode: "login" | "forgot") => void;
+  onForgotPassword: (email: string) => void;
+  onResetPassword: (token: string, password: string) => void;
+  resetToken: string;
   errorMessage?: string;
   helperMessage?: string;
 }) {
@@ -108,6 +98,7 @@ function AppModal({
     username: "",
     email: "",
     password: "",
+    confirmPassword: "",
   });
   const [error, setError] = useState("");
 
@@ -124,9 +115,10 @@ function AppModal({
       const username = form.username.trim();
       const password = form.password.trim();
       const fullName = form.fullName.trim();
+      const email = form.email.trim();
 
-      if (!fullName || !username || !password) {
-        setError("Full name, username, and password are required.");
+      if (!fullName || !username || !email || !password) {
+        setError("Full name, username, email, and password are required.");
         return;
       }
       if (password.length < 12) {
@@ -134,7 +126,35 @@ function AppModal({
         return;
       }
 
-      onRegister({ fullName, username, password });
+      onRegister({ fullName, username, email, password });
+      return;
+    }
+
+    if (mode === "forgot") {
+      const email = form.email.trim();
+      if (!email) {
+        setError("Enter the email address associated with your account.");
+        return;
+      }
+      onForgotPassword(email);
+      return;
+    }
+
+    if (mode === "reset") {
+      const password = form.password.trim();
+      if (!resetToken) {
+        setError("This password reset link is invalid or has expired. Request a new one.");
+        return;
+      }
+      if (password.length < 12) {
+        setError("Choose a password with at least 12 characters.");
+        return;
+      }
+      if (password !== form.confirmPassword) {
+        setError("The passwords do not match.");
+        return;
+      }
+      onResetPassword(resetToken, password);
       return;
     }
 
@@ -154,7 +174,7 @@ function AppModal({
       className="fixed inset-0 z-50 grid place-items-center bg-[#062b4f]/65 px-5 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label={mode === "register" ? "Create an account" : "Sign in"}
+      aria-label={mode === "register" ? "Create an account" : mode === "login" ? "Sign in" : mode === "forgot" ? "Reset your password" : "Choose a new password"}
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <div className="relative w-full max-w-md rounded-[2rem] bg-white p-7 shadow-2xl sm:p-9">
@@ -170,13 +190,25 @@ function AppModal({
 
         <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#cf334a]">ScholarPath</p>
         <h2 className="mt-2 text-3xl font-extrabold tracking-tight text-[#07345e]">
-          {mode === "register" ? "Create your profile" : "Welcome back"}
+          {mode === "register" ? "Create your profile" : mode === "login" ? "Welcome back" : mode === "forgot" ? "Forgot your password?" : "Reset your password"}
         </h2>
         <p className="mt-2 text-sm leading-6 text-slate-500">
           {mode === "register"
             ? "Tell us a little about yourself to unlock personalized matches."
-            : "Sign in to continue your scholarship journey."}
+            : mode === "login"
+              ? "Sign in to continue your scholarship journey."
+              : mode === "forgot"
+                ? "Enter your account email and we’ll send you a secure reset link."
+                : "Choose a new password to complete your account recovery."}
         </p>
+
+        {mode !== "forgot" && mode !== "reset" && (
+          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900">
+            {import.meta.env.VITE_API_URL
+              ? "Account and profile data are stored on the ScholarPath server. Do not enter sensitive information."
+              : "Account and profile data stay in this browser only and are not synced across devices. Do not enter sensitive information."}
+          </p>
+        )}
 
         {helperMessage && (
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
@@ -199,53 +231,87 @@ function AppModal({
             </label>
           )}
 
-          <label className="block text-sm font-bold text-slate-700">
-            Username
-            <input
-              name="username"
-              required
-              value={form.username}
-              onChange={handleChange}
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
-              placeholder="Pick a username"
-            />
-          </label>
+          {(mode === "register" || mode === "login") && (
+            <label className="block text-sm font-bold text-slate-700">
+              Username
+              <input
+                name="username"
+                required
+                value={form.username}
+                onChange={handleChange}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                placeholder={mode === "register" ? "Pick a username" : "Your username"}
+              />
+            </label>
+          )}
 
-          {mode === "register" && (
+          {(mode === "register" || mode === "forgot") && (
             <label className="block text-sm font-bold text-slate-700">
               Email address
               <input
                 name="email"
                 type="email"
+                required
                 value={form.email}
                 onChange={handleChange}
                 className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
-                placeholder="you@example.com"
+                placeholder={mode === "register" ? "you@example.com" : "Account email address"}
               />
             </label>
           )}
 
-          <label className="block text-sm font-bold text-slate-700">
-            Password
-            <input
-              name="password"
-              required
-              minLength={mode === "register" ? 12 : undefined}
-              type="password"
-              value={form.password}
-              onChange={handleChange}
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
-              placeholder={mode === "register" ? "At least 12 characters" : "Your password"}
-            />
-          </label>
+          {(mode === "register" || mode === "login" || mode === "reset") && (
+            <label className="block text-sm font-bold text-slate-700">
+              {mode === "reset" ? "New password" : "Password"}
+              <input
+                name="password"
+                required
+                minLength={mode === "register" || mode === "reset" ? 12 : undefined}
+                type="password"
+                value={form.password}
+                onChange={handleChange}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                placeholder={mode === "login" ? "Your password" : "At least 12 characters"}
+              />
+            </label>
+          )}
+
+          {mode === "reset" && (
+            <label className="block text-sm font-bold text-slate-700">
+              Confirm new password
+              <input
+                name="confirmPassword"
+                required
+                minLength={12}
+                type="password"
+                value={form.confirmPassword}
+                onChange={handleChange}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                placeholder="Enter the new password again"
+              />
+            </label>
+          )}
 
           {(error || errorMessage) && (
             <p className="text-sm font-medium text-[#cf334a]">{error || errorMessage}</p>
           )}
 
           <button className="w-full rounded-xl bg-[#0878c9] px-5 py-3.5 font-extrabold text-white shadow-lg shadow-blue-200 transition hover:bg-[#066ab2]">
-            {mode === "register" ? "Create free account" : "Sign in"}
+            {mode === "register" ? "Create free account" : mode === "login" ? "Sign in" : mode === "forgot" ? "Send reset link" : "Reset password"}
           </button>
+          {mode === "login" && (
+            <button
+              type="button"
+              className="w-full text-sm font-bold text-[#0878c9] transition hover:text-[#066ab2]"
+              onClick={() => {
+                setError("");
+                setForm((current) => ({ ...current, password: "" }));
+                onModeChange("forgot");
+              }}
+            >
+              Forgot password?
+            </button>
+          )}
         </form>
       </div>
     </div>
@@ -263,9 +329,54 @@ type Opportunity = {
   deadline: string;
   link: string;
   source: string;
+  keywords: readonly string[];
 };
 
+function EligibilityCriteria({
+  assessment,
+}: {
+  assessment: ReturnType<typeof getEligibilityAssessment>;
+}) {
+  const groups = [
+    { label: "Criteria supported by your profile", items: assessment.met, color: "text-emerald-700" },
+    { label: "Needs confirmation", items: assessment.unknown, color: "text-amber-800" },
+    { label: "May disqualify", items: assessment.mayDisqualify, color: "text-red-700" },
+  ].filter((group) => group.items.length > 0);
+
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-4">
+      <p className="text-sm font-extrabold text-[#07345e]">Eligibility check</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Profile fit is not an eligibility decision. Confirm every requirement with the provider.</p>
+      <div className="mt-3 space-y-3">
+        {groups.map((group) => (
+          <div key={group.label}>
+            <p className={`text-xs font-extrabold ${group.color}`}>{group.label}</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-5 text-slate-600">
+              {group.items.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 async function apiRequest(path: string, options: RequestInit = {}) {
+  const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, "");
+  if (apiUrl) {
+    const response = await fetch(`${apiUrl}/api${path}`, {
+      ...options,
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...options.headers },
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message ?? "The request could not be completed.");
+    return result;
+  }
+
+  if (path.startsWith("/password-reset/")) {
+    throw new Error("Password reset requires a connected account API and email delivery service.");
+  }
   return demoApiRequest(path, options);
 }
 
@@ -275,7 +386,7 @@ const scholarshipPool = [
     type: "Scholarship" as const,
     amount: "Full cost of attendance",
     description: "A highly selective scholarship that covers the cost of education for exceptional students with outstanding academic achievement and leadership potential.",
-    forWho: "High-achieving students, especially those demonstrating leadership, community impact, and financial need.",
+    forWho: "High school seniors with strong academics and leadership who meet the program's eligible U.S. citizenship or immigration-status requirements and qualify for a Federal Pell Grant.",
     process: "Apply through the official Gates Scholarship portal and submit academic records, essays, and financial information when prompted.",
     deadline: "Annual cycle",
     link: "https://www.thegatesscholarship.org/",
@@ -287,7 +398,7 @@ const scholarshipPool = [
     type: "Scholarship" as const,
     amount: "$20,000",
     description: "A scholarship program designed to support students who show initiative, resilience, and academic promise in their college journey.",
-    forWho: "Students with strong academic records, leadership, and a demonstrated need for support to complete college.",
+    forWho: "High school seniors with a minimum 2.4 GPA who qualify for a Federal Pell Grant and plan to attend an eligible four-year public college or university in Texas.",
     process: "Apply online through the Dell Scholars application, including academic information, essays, and proof of college enrollment or eligibility.",
     deadline: "Annual cycle",
     link: "https://www.dellscholars.org/",
@@ -299,7 +410,7 @@ const scholarshipPool = [
     type: "Scholarship" as const,
     amount: "$20,000",
     description: "A prestigious scholarship recognizing students who demonstrate leadership, service, and academic excellence in their communities.",
-    forWho: "Students with strong academics and a history of service, leadership, and campus or community involvement.",
+    forWho: "High school seniors with at least a 3.0 unweighted GPA who meet the program's eligible U.S. citizenship or immigration-status requirements and demonstrate leadership and service.",
     process: "Create an account through the Coca-Cola Scholars Foundation site and submit a complete application, essays, and recommendations.",
     deadline: "Annual cycle",
     link: "https://www.coca-colascholarsfoundation.org/",
@@ -371,7 +482,7 @@ const scholarshipPool = [
     type: "Scholarship" as const,
     amount: "Up to $55,000 per year",
     description: "A college scholarship program supporting high-achieving students with financial need.",
-    forWho: "High-achieving high school seniors with financial need who plan to attend an accredited four-year college.",
+    forWho: "High school seniors with at least a 3.75 cumulative unweighted GPA, financial need, and plans to attend an accredited four-year college; families with annual gross income up to $95,000 may be considered.",
     process: "Review current eligibility and apply through the Jack Kent Cooke Foundation's official scholarship portal.",
     deadline: "Annual cycle",
     link: "https://www.jkcf.org/our-scholarships/college-scholarship-program/",
@@ -383,7 +494,7 @@ const scholarshipPool = [
     type: "Scholarship" as const,
     amount: "Varies by award",
     description: "A national scholarship competition recognizing service, leadership, and academic achievement.",
-    forWho: "High school seniors demonstrating leadership, community service, and academic commitment.",
+    forWho: "Current high school seniors who are U.S. citizens and plan to enroll full-time in an accredited four-year U.S. undergraduate program; selection considers academics, leadership, community service, and financial need.",
     process: "Check current rules and submit the online application through the Elks National Foundation.",
     deadline: "Annual cycle",
     link: "https://www.elks.org/scholars/scholarships/MVS.cfm",
@@ -401,6 +512,54 @@ const scholarshipPool = [
     link: "https://www.amazonfutureengineer.com/scholarships",
     source: "Amazon Future Engineer",
     keywords: ["computer", "science", "engineering", "technology", "stem", "academic"],
+  },
+  {
+    title: "NIH Undergraduate Scholarship Program",
+    type: "Scholarship" as const,
+    amount: "Funding varies by approved educational costs",
+    description: "A federal program that supports undergraduate students pursuing biomedical, behavioral, and clinical research careers.",
+    forWho: "Undergraduate students in biomedical, behavioral, or clinical research fields who have financial need and academic potential.",
+    process: "Review current eligibility requirements and apply through the NIH Undergraduate Scholarship Program portal.",
+    deadline: "Annual cycle",
+    link: "https://www.training.nih.gov/ugsp/",
+    source: "National Institutes of Health",
+    keywords: ["biomedical", "biology", "medical", "medicine", "health", "research", "science", "stem", "undergraduate", "clinical"],
+  },
+  {
+    title: "Amgen Scholars",
+    type: "Scholarship" as const,
+    amount: "Research stipend and program support",
+    description: "A competitive summer research program that supports students pursuing biomedical sciences and related research fields.",
+    forWho: "Undergraduate students interested in biomedical research, laboratory science, and related STEM careers.",
+    process: "Apply through the Amgen Scholars program and complete the current application, transcript, and research-interest requirements.",
+    deadline: "Program-specific",
+    link: "https://amgenscholars.com/",
+    source: "Amgen Scholars",
+    keywords: ["biomedical", "biology", "medicine", "research", "science", "lab", "stem", "health"],
+  },
+  {
+    title: "HOSA Future Health Professionals Scholarships",
+    type: "Scholarship" as const,
+    amount: "Varies by scholarship",
+    description: "Scholarships for students preparing for careers in health professions, healthcare leadership, and public health.",
+    forWho: "Students pursuing health professions, healthcare, nursing, public health, and related career pathways.",
+    process: "Review the current HOSA scholarship opportunities and apply through the HOSA Future Health Professionals platform.",
+    deadline: "Annual cycle",
+    link: "https://hosa.org/",
+    source: "HOSA Future Health Professionals",
+    keywords: ["health", "healthcare", "nursing", "medicine", "public health", "biomedical", "clinical", "professional"],
+  },
+  {
+    title: "National Health Service Corps Scholarship",
+    type: "Scholarship" as const,
+    amount: "Tuition, fees, and additional support may be covered",
+    description: "A federal scholarship program for eligible students in health professions who commit to serving in underserved communities.",
+    forWho: "Students pursuing qualifying health professions who are willing to complete service in an underserved area.",
+    process: "Check current program eligibility and apply through the National Health Service Corps scholarship portal.",
+    deadline: "Annual cycle",
+    link: "https://nhsc.hrsa.gov/scholarships",
+    source: "Health Resources and Services Administration",
+    keywords: ["health", "medicine", "healthcare", "nursing", "public health", "clinical", "service", "underserved"],
   },
   {
     title: "Burger King Scholars Program",
@@ -588,22 +747,46 @@ const financialAidPool = [
 ] as const;
 
 export default function App() {
-  const [modal, setModal] = useState<"register" | "login" | null>(null);
+  const [modal, setModal] = useState<"register" | "login" | "forgot" | "reset" | null>(null);
+  const [resetToken, setResetToken] = useState("");
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
+  const [expandedMatchTitle, setExpandedMatchTitle] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "bot"; text: string }[]>([
     {
       role: "bot",
-      text: "Hi! I’m Liberty. Ask me how ScholarPath works, how to use it, or how to improve your profile.",
+      text: "Hi! I’m ScholarBot. Ask me how ScholarPath works, how to use it, or how to improve your profile.",
     },
   ]);
   const [authError, setAuthError] = useState("");
   const [currentUser, setCurrentUser] = useState<StoredUser | null>(null);
   const [isAdminMode, setIsAdminMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<"profile" | "newsletter" | "scholarships" | "financialAid">("profile");
+  const [activeTab, setActiveTab] = useState<"profile" | "newsletter" | "scholarships" | "financialAid" | "roadmap">("profile");
   const [newsletters, setNewsletters] = useState<Array<{ id: number; title: string; summary: string; category: string; created_at: string; created_by: string }>>([]);
   const [adminNewsletters, setAdminNewsletters] = useState<any[]>([]);
+  const [roadmapProfile, setRoadmapProfile] = useState<RoadmapProfile>(roadmapProfileDefaults);
+  const [roadmapTaskStatuses, setRoadmapTaskStatuses] = useState<Partial<Record<string, RoadmapTaskStatus>>>({});
+  const [savedScholarships, setSavedScholarships] = useState<
+    Array<{
+      id: string;
+      title: string;
+      amount: string;
+      deadline: string;
+      link: string;
+      status: "Interested" | "Preparing Application" | "Ready to Submit" | "Submitted" | "Awarded" | "Not Selected";
+      notes: string;
+    }>
+  >([]);
+  const [roadmapSearch, setRoadmapSearch] = useState("");
+  const [fundingEstimator, setFundingEstimator] = useState({
+    tuitionAndFees: "",
+    housingFood: "",
+    otherExpenses: "",
+    grants: "",
+    scholarships: "",
+    otherAssistance: "",
+  });
   const [adminDraft, setAdminDraft] = useState({ title: "", summary: "", category: "General" });
   const [draftProfile, setDraftProfile] = useState<StudentProfile>(currentUser?.profile ?? profileDefaults);
   const [statusMessage, setStatusMessage] = useState("");
@@ -623,10 +806,19 @@ export default function App() {
     clearLegacyAuthData();
     loadNewsletters();
 
+    const token =
+      new URLSearchParams(window.location.hash.slice(1)).get("resetToken") ??
+      new URLSearchParams(window.location.search).get("resetToken");
+    if (token) {
+      setResetToken(token);
+      setModal("reset");
+    }
+
     apiRequest("/me")
       .then((response) => {
         const user = response.user;
         setCurrentUser(user);
+        setActiveTab("profile");
         setIsAdminMode(Boolean(user.isAdmin));
         setDraftProfile(normalizeStudentProfile(user.profile));
       })
@@ -680,13 +872,14 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  async function handleRegister({ fullName, username, password }: { fullName: string; username: string; password: string }) {
+  async function handleRegister({ fullName, username, email, password }: { fullName: string; username: string; email: string; password: string }) {
     try {
       await apiRequest("/register", {
         method: "POST",
         body: JSON.stringify({
           fullName,
           username,
+          email,
           password,
           profile: {
             ...profileDefaults,
@@ -714,6 +907,7 @@ export default function App() {
       });
       const user = response.user;
       setCurrentUser(user);
+      setActiveTab("profile");
       setDraftProfile(normalizeStudentProfile(user.profile));
       setIsAdminMode(Boolean(user.isAdmin));
 
@@ -735,6 +929,36 @@ export default function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to login.";
       setAuthError(message);
+    }
+  }
+
+  async function handleForgotPassword(email: string) {
+    try {
+      await apiRequest("/password-reset/request", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setAuthError("");
+      setStatusMessage("If an account exists for that email, a password reset link is on its way.");
+      setModal("login");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to request a password reset.");
+    }
+  }
+
+  async function handleResetPassword(token: string, password: string) {
+    try {
+      await apiRequest("/password-reset/confirm", {
+        method: "POST",
+        body: JSON.stringify({ token, password }),
+      });
+      setAuthError("");
+      setStatusMessage("Your password has been reset. Sign in with your new password.");
+      setResetToken("");
+      window.history.replaceState({}, "", window.location.pathname);
+      setModal("login");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to reset your password.");
     }
   }
 
@@ -762,6 +986,15 @@ export default function App() {
       setCurrentUser({ ...user, profile });
       setDraftProfile(profile);
       setStatusMessage("Profile saved successfully.");
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        confetti({
+          particleCount: 72,
+          spread: 68,
+          startVelocity: 38,
+          origin: { y: 0.65 },
+          colors: ["#0878c9", "#ffffff", "#cf334a"],
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Profile save failed.";
       setStatusMessage(message);
@@ -816,22 +1049,115 @@ export default function App() {
     }));
   }
 
-  function getRecommendations(profile: StudentProfile): Opportunity[] {
-    return getProfileRecommendations(profile, scholarshipPool, financialAidPool).map((item) => ({
-      title: item.title,
-      type: item.type,
-      amount: item.amount,
-      match: item.match,
-      description: item.description,
-      forWho: item.forWho,
-      process: item.process,
-      deadline: item.deadline,
-      link: item.link,
-      source: item.source,
+  function handleRoadmapChange(field: keyof RoadmapProfile, value: string) {
+    setRoadmapProfile((current) => ({
+      ...current,
+      [field]: value,
     }));
   }
 
-  function getLibertyResponse(input: string) {
+  function handleSaveScholarship(opportunity: Opportunity) {
+    setSavedScholarships((current) => {
+      const existing = current.find((item) => item.title === opportunity.title);
+      if (existing) {
+        return current.filter((item) => item.title !== opportunity.title);
+      }
+
+      return [
+        {
+          id: opportunity.title,
+          title: opportunity.title,
+          amount: opportunity.amount,
+          deadline: opportunity.deadline,
+          link: opportunity.link,
+          status: "Interested",
+          notes: "",
+        },
+        ...current,
+      ];
+    });
+  }
+
+  function updateSavedScholarshipStatus(title: string, status: string) {
+    setSavedScholarships((current) =>
+      current.map((item) => (item.title === title ? { ...item, status: status as any } : item)),
+    );
+  }
+
+  function updateSavedScholarshipNotes(title: string, notes: string) {
+    setSavedScholarships((current) =>
+      current.map((item) => (item.title === title ? { ...item, notes } : item)),
+    );
+  }
+
+  function updateRoadmapTaskStatus(taskId: string, nextStatus: RoadmapTaskStatus) {
+    setRoadmapTaskStatuses((current) => ({
+      ...current,
+      [taskId]: nextStatus,
+    }));
+  }
+
+  const recommendations = useMemo(
+    () =>
+      getProfileRecommendations(draftProfile, scholarshipPool, financialAidPool).map((item) => ({
+        title: item.title,
+        type: item.type,
+        amount: item.amount,
+        match: item.match,
+        description: item.description,
+        forWho: item.forWho,
+        process: item.process,
+        deadline: item.deadline,
+        link: item.link,
+        source: item.source,
+        keywords: item.keywords,
+      })),
+    [draftProfile],
+  );
+
+  const scholarshipRecommendations = recommendations.filter((item) => item.type === "Scholarship");
+  const financialAidRecommendations = recommendations.filter((item) => item.type === "Financial aid");
+  const roadmapTasks = useMemo(() => buildRoadmapTasks(roadmapProfile, roadmapTaskStatuses), [roadmapProfile, roadmapTaskStatuses]);
+  const nextBestStep = useMemo(() => getNextBestStep(roadmapProfile, roadmapTasks), [roadmapProfile, roadmapTasks]);
+  const roadmapCompletion = roadmapTasks.length
+    ? Math.round((roadmapTasks.filter((task) => task.status === "Completed").length / roadmapTasks.length) * 100)
+    : 0;
+  const estimator = useMemo(() => calculateEstimatedFundingGap(fundingEstimator), [fundingEstimator]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("scholarpath_roadmap_profile_v1", JSON.stringify(roadmapProfile));
+    window.localStorage.setItem("scholarpath_roadmap_tasks_v1", JSON.stringify(roadmapTaskStatuses));
+    window.localStorage.setItem("scholarpath_saved_scholarships_v1", JSON.stringify(savedScholarships));
+    window.localStorage.setItem("scholarpath_estimator_v1", JSON.stringify(fundingEstimator));
+  }, [roadmapProfile, roadmapTaskStatuses, savedScholarships, fundingEstimator]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const storedRoadmapProfile = window.localStorage.getItem("scholarpath_roadmap_profile_v1");
+      const storedTasks = window.localStorage.getItem("scholarpath_roadmap_tasks_v1");
+      const storedScholarships = window.localStorage.getItem("scholarpath_saved_scholarships_v1");
+      const storedEstimator = window.localStorage.getItem("scholarpath_estimator_v1");
+
+      if (storedRoadmapProfile) {
+        setRoadmapProfile({ ...roadmapProfileDefaults, ...JSON.parse(storedRoadmapProfile) });
+      }
+      if (storedTasks) {
+        setRoadmapTaskStatuses(JSON.parse(storedTasks));
+      }
+      if (storedScholarships) {
+        setSavedScholarships(JSON.parse(storedScholarships));
+      }
+      if (storedEstimator) {
+        setFundingEstimator({ ...fundingEstimator, ...JSON.parse(storedEstimator) });
+      }
+    } catch {
+      // Ignore invalid localStorage values and fall back to default state.
+    }
+  }, []);
+
+  function getScholarBotResponse(input: string) {
     const query = input.trim().toLowerCase();
 
     if (!query) {
@@ -867,7 +1193,7 @@ export default function App() {
     }
 
     if (query.includes("hello") || query.includes("hi") || query.includes("hey")) {
-      return "Hi! I’m Liberty, your ScholarPath guide. Ask me anything about how to use the app or how to improve your scholarship profile.";
+      return "Hi! I’m ScholarBot, your ScholarPath guide. Ask me anything about how to use the app or how to improve your scholarship profile.";
     }
 
     return "I can help with how ScholarPath works, how to use the app, scholarship matching, or editing your profile. Try one of the suggested questions or ask me in your own words.";
@@ -883,7 +1209,7 @@ export default function App() {
     setChatMessages((current) => [...current, { role: "user", text }]);
     setChatInput("");
 
-    const reply = getLibertyResponse(text);
+    const reply = getScholarBotResponse(text);
     setChatMessages((current) => [...current, { role: "bot", text: reply }]);
   }
 
@@ -892,11 +1218,9 @@ export default function App() {
       <header className="sticky top-0 z-40 border-b border-blue-100/80 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
           <a href="#" className="flex items-center gap-3" aria-label="ScholarPath home">
-            <img
-              src={scholarPathLogo}
-              alt="ScholarPath logo"
-              className="h-12 w-12 rounded-xl object-cover shadow-md shadow-blue-200"
-            />
+            <span className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-xl bg-white p-1 shadow-md shadow-blue-200">
+              <img src="/scholarpath-logo.png" alt="" className="h-full w-full object-contain" />
+            </span>
             <span className="text-xl font-extrabold tracking-tight text-[#07345e]">
               Scholar<span className="text-[#cf334a]">Path</span>
             </span>
@@ -912,6 +1236,11 @@ export default function App() {
             <a className="transition hover:text-[#0878c9]" href="#stories">
               Student stories
             </a>
+            {!currentUser && (
+              <a className="transition hover:text-[#0878c9]" href="#funding-roadmap">
+                Funding roadmap
+              </a>
+            )}
           </nav>
 
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
@@ -1048,27 +1377,28 @@ export default function App() {
               aria-label={selectedOpportunity.title}
               onMouseDown={(event) => event.target === event.currentTarget && setSelectedOpportunity(null)}
             >
-              <div className="relative w-full max-w-xl rounded-[2rem] bg-white p-7 shadow-2xl sm:p-8">
-                <button
-                  aria-label="Close opportunity"
-                  className="absolute right-5 top-5 grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                  onClick={() => setSelectedOpportunity(null)}
-                >
-                  <Icon className="h-4 w-4">
-                    <path d="m6 6 12 12M18 6 6 18" />
-                  </Icon>
-                </button>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-extrabold uppercase tracking-[0.16em] text-[#0878c9]">
-                    {selectedOpportunity.type}
-                  </span>
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-extrabold text-emerald-700">
-                    {selectedOpportunity.match}% match
-                  </span>
+              <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-extrabold uppercase tracking-[0.16em] text-[#0878c9]">
+                      {selectedOpportunity.type}
+                    </span>
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-extrabold text-emerald-700">
+                      {selectedOpportunity.match}% profile fit
+                    </span>
+                  </div>
+                  <button
+                    aria-label="Close opportunity"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+                    onClick={() => setSelectedOpportunity(null)}
+                  >
+                    <Icon className="h-4 w-4">
+                      <path d="m6 6 12 12M18 6 6 18" />
+                    </Icon>
+                  </button>
                 </div>
 
-                <h3 className="mt-5 text-3xl font-black tracking-tight text-[#07345e]">
+                <h3 className="mt-4 text-2xl font-black tracking-tight text-[#07345e]">
                   {selectedOpportunity.title}
                 </h3>
                 <p className="mt-2 text-lg font-extrabold text-[#cf334a]">{selectedOpportunity.amount}</p>
@@ -1076,26 +1406,27 @@ export default function App() {
                   {selectedOpportunity.deadline}
                 </p>
 
-                <div className="mt-6 space-y-5 text-slate-600">
+                <div className="mt-5 space-y-4 text-slate-600">
                   <div>
                     <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#07345e]">
                       Overview
                     </p>
-                    <p className="mt-2 leading-7">{selectedOpportunity.description}</p>
+                    <p className="mt-2 leading-6">{selectedOpportunity.description}</p>
                   </div>
                   <div>
                     <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#07345e]">
                       Who it is for
                     </p>
-                    <p className="mt-2 leading-7">{selectedOpportunity.forWho}</p>
+                    <p className="mt-2 leading-6">{selectedOpportunity.forWho}</p>
                   </div>
+                  <EligibilityCriteria assessment={getEligibilityAssessment(draftProfile, selectedOpportunity)} />
                   <div>
                     <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#07345e]">
                       How to apply
                     </p>
-                    <p className="mt-2 leading-7">{selectedOpportunity.process}</p>
+                    <p className="mt-2 leading-6">{selectedOpportunity.process}</p>
                   </div>
-                  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
                     <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#07345e]">Official source</p>
                     <p className="mt-2 text-sm font-bold text-[#0878c9]">{selectedOpportunity.source}</p>
                     <a
@@ -1146,6 +1477,13 @@ export default function App() {
                 </button>
                 <button
                   type="button"
+                  className={`rounded-full px-4 py-2 text-sm font-extrabold ${activeTab === "roadmap" ? "bg-[#0878c9] text-white" : "bg-white text-[#07345e]"}`}
+                  onClick={() => setActiveTab("roadmap")}
+                >
+                  Funding Roadmap
+                </button>
+                <button
+                  type="button"
                   className={`rounded-full px-4 py-2 text-sm font-extrabold ${activeTab === "newsletter" ? "bg-[#cf334a] text-white" : "bg-white text-[#07345e]"}`}
                   onClick={() => setActiveTab("newsletter")}
                 >
@@ -1182,12 +1520,28 @@ export default function App() {
 
                   <div className="mt-8 space-y-4">
                     <div className="rounded-2xl bg-white/8 p-4">
-                      <p className="text-sm text-blue-100">GPA</p>
-                      <p className="mt-2 text-3xl font-black">{draftProfile.gpa || "—"}</p>
+                      <p className="text-sm text-blue-100">Unweighted GPA / 4.0</p>
+                      <p className="mt-2 text-3xl font-black">{draftProfile.gpa ? `${draftProfile.gpa} / 4.0` : "—"}</p>
                     </div>
                     <div className="rounded-2xl bg-white/8 p-4">
                       <p className="text-sm text-blue-100">AP courses</p>
                       <p className="mt-2 text-3xl font-black">{draftProfile.apCount || "—"}</p>
+                    </div>
+                    {Number(draftProfile.apCount) > 0 && (
+                      <div className="rounded-2xl bg-white/8 p-4">
+                        <p className="text-sm text-blue-100">AP exams scored 3+</p>
+                        <p className="mt-2 text-2xl font-black">{draftProfile.apTests3Plus || "Not entered"}</p>
+                      </div>
+                    )}
+                    <div className="rounded-2xl bg-white/8 p-4">
+                      <p className="text-sm text-blue-100">Location</p>
+                      <p className="mt-2 text-lg font-bold">
+                        {draftProfile.isInUS === "yes" ? draftProfile.state || "U.S. state not set" : draftProfile.isInUS === "no" ? "Outside the U.S." : "Not set"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-white/8 p-4">
+                      <p className="text-sm text-blue-100">Leadership and activities</p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm font-bold">{draftProfile.leadershipActivities || "Not added"}</p>
                     </div>
                     <div className="rounded-2xl bg-white/8 p-4">
                       <p className="text-sm text-blue-100">Ethnicity</p>
@@ -1244,9 +1598,71 @@ export default function App() {
                           <option value="">Select</option>
                           <option value="Woman">Woman</option>
                           <option value="Man">Man</option>
-                          <option value="Non-binary">Non-binary</option>
                           <option value="Prefer not to say">Prefer not to say</option>
                         </select>
+                      </label>
+
+                      <label className="block text-sm font-bold text-slate-700">
+                        Are you currently in the United States?
+                        <select
+                          value={draftProfile.isInUS}
+                          onChange={(event) => handleProfileChange("isInUS", event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                        >
+                          <option value="">Select or skip</option>
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      </label>
+
+                      {draftProfile.isInUS === "yes" && (
+                        <label className="block text-sm font-bold text-slate-700">
+                          State
+                          <input
+                            list="scholarpath-us-states"
+                            value={draftProfile.state}
+                            onChange={(event) => handleProfileChange("state", event.target.value)}
+                            autoComplete="address-level1"
+                            className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                            placeholder="Type or choose a state"
+                          />
+                          <datalist id="scholarpath-us-states">
+                            {usStates.map((state) => <option key={state} value={state} />)}
+                          </datalist>
+                        </label>
+                      )}
+
+                      <label className="block text-sm font-bold text-slate-700">
+                        Citizenship / immigration status <span className="font-normal text-slate-400">(optional)</span>
+                        <select
+                          value={draftProfile.citizenshipStatus}
+                          onChange={(event) => handleProfileChange("citizenshipStatus", event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                        >
+                          <option value="">Select or skip</option>
+                          <option value="us-citizen">U.S. citizen</option>
+                          <option value="permanent-resident">Permanent resident (green card)</option>
+                          <option value="eligible-noncitizen">Other eligible noncitizen status</option>
+                          <option value="other-status">Another status</option>
+                          <option value="prefer-not-to-say">Prefer not to say</option>
+                        </select>
+                      </label>
+
+                      <label className="block text-sm font-bold text-slate-700">
+                        Annual family income <span className="font-normal text-slate-400">(optional range)</span>
+                        <select
+                          value={draftProfile.familyIncomeRange}
+                          onChange={(event) => handleProfileChange("familyIncomeRange", event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                        >
+                          <option value="">Select or skip</option>
+                          <option value="under-50000">Under $50,000</option>
+                          <option value="50000-74999">$50,000–$74,999</option>
+                          <option value="75000-95000">$75,000–$95,000</option>
+                          <option value="over-95000">Over $95,000</option>
+                          <option value="prefer-not-to-say">Prefer not to say</option>
+                        </select>
+                        <span className="mt-2 block text-xs font-normal leading-5 text-slate-500">A range is optional. It can flag stated income considerations but does not determine financial need or Pell Grant eligibility.</span>
                       </label>
 
                       <label className="block text-sm font-bold text-slate-700">
@@ -1278,7 +1694,7 @@ export default function App() {
                       </label>
 
                       <label className="block text-sm font-bold text-slate-700">
-                        GPA
+                        Unweighted GPA (4.0 scale)
                         <input
                           type="number"
                           min="0"
@@ -1292,7 +1708,7 @@ export default function App() {
                       </label>
 
                       <label className="block text-sm font-bold text-slate-700">
-                        # of AP classes
+                        Number of AP classes taken
                         <input
                           type="number"
                           min="0"
@@ -1303,6 +1719,21 @@ export default function App() {
                           placeholder="6"
                         />
                       </label>
+
+                      {Number(draftProfile.apCount) > 0 && (
+                        <label className="block text-sm font-bold text-slate-700">
+                          How many AP exams did you score 3 or higher on?
+                          <input
+                            type="number"
+                            min="0"
+                            max={draftProfile.apCount}
+                            value={draftProfile.apTests3Plus}
+                            onChange={(event) => handleProfileChange("apTests3Plus", event.target.value)}
+                            className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                            placeholder="0"
+                          />
+                        </label>
+                      )}
 
                       <label className="block text-sm font-bold text-slate-700">
                         Graduation year
@@ -1349,6 +1780,17 @@ export default function App() {
                       </label>
 
                       <label className="block text-sm font-bold text-slate-700 md:col-span-2">
+                        Leadership and activities
+                        <textarea
+                          rows={4}
+                          value={draftProfile.leadershipActivities ?? ""}
+                          onChange={(event) => handleProfileChange("leadershipActivities", event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-normal outline-none transition focus:border-[#0878c9] focus:ring-4 focus:ring-blue-50"
+                          placeholder="Clubs, leadership roles, volunteering, sports, work, or other activities"
+                        />
+                      </label>
+
+                      <label className="block text-sm font-bold text-slate-700 md:col-span-2">
                         Newsletters
                         <textarea
                           rows={3}
@@ -1384,7 +1826,7 @@ export default function App() {
                 <div>
                   <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Scholarships</p>
                   <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">Opportunities matched for you</h2>
-                  <p className="mt-2 text-sm text-slate-500">Demo estimates from your academic profile and the built-in catalog. Confirm eligibility and deadlines with each provider.</p>
+                  <p className="mt-2 text-sm text-slate-500">Preliminary estimates based on your academic profile and our catalog. Confirm eligibility and deadlines with each provider.</p>
                 </div>
                 <button type="button" onClick={() => setActiveTab("profile")} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-[#07345e]">
                   Back to profile
@@ -1392,30 +1834,68 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                {getRecommendations(draftProfile).filter((item) => item.type === "Scholarship").length === 0 ? (
+                {scholarshipRecommendations.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Add your GPA, AP count, intended major, or interests in your profile to see relevant matches.</p>
-                ) : getRecommendations(draftProfile)
-                  .filter((item) => item.type === "Scholarship")
-                  .map((item) => (
-                    <button
-                      key={item.title}
-                      type="button"
-                      onClick={() => setSelectedOpportunity(item)}
-                      className="w-full rounded-[1.5rem] border border-blue-100 bg-[#f9fbff] p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#0878c9] hover:shadow-md"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
+                ) : scholarshipRecommendations.map((item) => {
+                    const reasons = getRecommendationReasons(draftProfile, item);
+                  const eligibility = getEligibilityAssessment(draftProfile, item);
+                    const isExpanded = expandedMatchTitle === item.title;
+
+                    return (
+                      <article key={item.title} className="rounded-[1.5rem] border border-blue-100 bg-[#f9fbff] p-4 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOpportunity(item)}
+                          className="w-full text-left"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
+                              <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
+                            </div>
+                            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-extrabold text-emerald-700">{item.match}% profile fit</span>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
+                            <span className="text-sm font-bold text-[#0878c9]">View details</span>
+                          </div>
+                        </button>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            aria-expanded={isExpanded}
+                            onClick={() => setExpandedMatchTitle(isExpanded ? null : item.title)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-[#07345e] transition hover:border-[#0878c9] hover:text-[#0878c9]"
+                          >
+                            <span aria-hidden="true">🔎</span>
+                            {isExpanded ? "Hide match and eligibility" : "Why this match?"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveScholarship(item)}
+                            className={`inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold transition ${savedScholarships.some((saved) => saved.title === item.title) ? "bg-emerald-100 text-emerald-700" : "bg-[#0878c9] text-white hover:bg-[#066ab2]"}`}
+                          >
+                            {savedScholarships.some((saved) => saved.title === item.title) ? "Saved to tracker" : "Save to tracker"}
+                          </button>
                         </div>
-                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-extrabold text-emerald-700">{item.match}% profile fit</span>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
-                        <span className="text-sm font-bold text-[#0878c9]">View details</span>
-                      </div>
-                    </button>
-                  ))}
+                        {isExpanded && (
+                          <div className="mt-3 rounded-xl border border-blue-100 bg-white p-4" aria-live="polite">
+                            <p className="text-sm font-extrabold text-[#07345e]">Why this match?</p>
+                            {reasons.length ? (
+                              <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-600">
+                                {reasons.map((reason) => (
+                                  <li key={reason.label}><span className="font-bold text-slate-700">{reason.label}:</span> {reason.detail}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-2 text-sm leading-6 text-slate-600">This opportunity is included as a broad option in the catalog. Add your intended major or interests to see a more specific explanation.</p>
+                            )}
+                            <EligibilityCriteria assessment={eligibility} />
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
               </div>
             </section>
           ) : activeTab === "financialAid" ? (
@@ -1424,7 +1904,7 @@ export default function App() {
                 <div>
                   <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Financial aid</p>
                   <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">Support options for you</h2>
-                  <p className="mt-2 text-sm text-slate-500">Demo estimates from your academic profile and the built-in catalog. Confirm eligibility and deadlines with each provider.</p>
+                  <p className="mt-2 text-sm text-slate-500">Preliminary estimates based on your academic profile and our catalog. Confirm eligibility and deadlines with each provider.</p>
                 </div>
                 <button type="button" onClick={() => setActiveTab("profile")} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-[#07345e]">
                   Back to profile
@@ -1432,31 +1912,225 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                {getRecommendations(draftProfile).filter((item) => item.type === "Financial aid").length === 0 ? (
+                {financialAidRecommendations.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Add your GPA, AP count, intended major, or interests in your profile to see relevant options.</p>
-                ) : getRecommendations(draftProfile)
-                  .filter((item) => item.type === "Financial aid")
-                  .map((item) => (
-                    <button
-                      key={item.title}
-                      type="button"
-                      onClick={() => setSelectedOpportunity(item)}
-                      className="w-full rounded-[1.5rem] border border-red-100 bg-[#fff9f9] p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#cf334a] hover:shadow-md"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
-                        </div>
-                        <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-extrabold text-[#cf334a]">{item.match}% profile fit</span>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
-                        <span className="text-sm font-bold text-[#0878c9]">View details</span>
-                      </div>
-                    </button>
-                  ))}
+                ) : financialAidRecommendations.map((item) => {
+                    const eligibility = getEligibilityAssessment(draftProfile, item);
+                    const isExpanded = expandedMatchTitle === item.title;
+
+                    return (
+                      <article key={item.title} className="rounded-[1.5rem] border border-red-100 bg-[#fff9f9] p-4 shadow-sm">
+                        <button type="button" onClick={() => setSelectedOpportunity(item)} className="w-full text-left">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-lg font-extrabold text-[#07345e]">{item.title}</p>
+                              <p className="mt-1 text-sm text-slate-500">{item.deadline}</p>
+                            </div>
+                            <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-extrabold text-[#cf334a]">{item.match}% profile fit</span>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <span className="text-sm font-bold text-[#cf334a]">{item.amount}</span>
+                            <span className="text-sm font-bold text-[#0878c9]">View details</span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          onClick={() => setExpandedMatchTitle(isExpanded ? null : item.title)}
+                          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-bold text-[#07345e] transition hover:border-[#cf334a] hover:text-[#cf334a]"
+                        >
+                          {isExpanded ? "Hide eligibility check" : "Check eligibility"}
+                        </button>
+                        {isExpanded && <EligibilityCriteria assessment={eligibility} />}
+                      </article>
+                    );
+                  })}
               </div>
+            </section>
+          ) : activeTab === "roadmap" ? (
+            <section className="space-y-6">
+              <div className="rounded-[2rem] border border-blue-100 bg-[#f5fbff] p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Funding roadmap</p>
+                    <h2 className="mt-2 text-3xl font-black tracking-tight text-[#07345e]">Three simple steps to pay for college</h2>
+                  </div>
+                  <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 text-right shadow-sm">
+                    <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-slate-500">Progress</div>
+                    <div className="mt-1 text-2xl font-black text-[#07345e]">{roadmapCompletion}%</div>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                  {[
+                    {
+                      title: "1. Build your profile",
+                      text: "Tell us your school, goals, and major so the roadmap fits your real situation.",
+                      accent: "bg-[#0878c9]",
+                    },
+                    {
+                      title: "2. Explore funding",
+                      text: "See scholarships and aid that match your profile, interests, and timeline.",
+                      accent: "bg-[#cf334a]",
+                    },
+                    {
+                      title: "3. Track progress",
+                      text: "Keep applications, deadlines, and next steps in one easy place.",
+                      accent: "bg-[#0878c9]",
+                    },
+                  ].map((step) => (
+                    <div key={step.title} className="rounded-[1.5rem] border border-blue-100 bg-white p-5 shadow-sm">
+                      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${step.accent} text-sm font-black text-white`}>
+                        {step.title.split(".")[0]}
+                      </span>
+                      <h3 className="mt-4 text-xl font-black text-[#07345e]">{step.title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{step.text}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {nextBestStep ? (
+                  <div className="mt-6 rounded-[1.5rem] border border-blue-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#0878c9]">Next best step</span>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <h3 className="text-2xl font-black text-[#07345e]">{nextBestStep.title}</h3>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{nextBestStep.explanation}</p>
+                        <div className="mt-3 rounded-xl bg-[#f8fbff] p-3 text-sm leading-6 text-slate-600">
+                          <span className="font-bold text-[#07345e]">Why this comes first:</span> {nextBestStep.why}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateRoadmapTaskStatus(nextBestStep.id, "In Progress")}
+                          className="rounded-xl bg-[#0878c9] px-4 py-2.5 text-sm font-extrabold text-white hover:bg-[#066ab2]"
+                        >
+                          Start this
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateRoadmapTaskStatus(nextBestStep.id, "Completed")}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-extrabold text-[#07345e] hover:border-blue-200 hover:bg-blue-50"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-6 rounded-[1.5rem] border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-700">
+                    Nice work — your plan is complete. Revisit it whenever your goals or deadlines change.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+                <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Quick setup</p>
+                      <h3 className="mt-2 text-2xl font-black text-[#07345e]">A few details to personalize your plan</h3>
+                    </div>
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#0878c9]">1 minute</span>
+                  </div>
+
+                  <div className="mt-5 grid gap-3 md:grid-cols-2">
+                    <label className="block text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                      Grade level
+                      <select value={roadmapProfile.gradeLevel} onChange={(event) => handleRoadmapChange("gradeLevel", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none">
+                        <option value="">Select</option>
+                        <option value="9">9th grade</option>
+                        <option value="10">10th grade</option>
+                        <option value="11">11th grade</option>
+                        <option value="12">12th grade</option>
+                        <option value="graduated">Already graduated</option>
+                      </select>
+                    </label>
+
+                    <label className="block text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500">
+                      School or college
+                      <input value={roadmapProfile.school} onChange={(event) => handleRoadmapChange("school", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none" placeholder="School name" />
+                    </label>
+
+                    <label className="block text-xs font-extrabold uppercase tracking-[0.12em] text-slate-500 md:col-span-2">
+                      Major or career goal
+                      <input value={roadmapProfile.major} onChange={(event) => handleRoadmapChange("major", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none" placeholder="Computer science, nursing, business..." />
+                    </label>
+                  </div>
+
+                  <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    Your answers help us suggest the right next step without overwhelming you with all the details at once.
+                  </p>
+                </section>
+
+                <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Saved opportunities</p>
+                      <h3 className="mt-2 text-2xl font-black text-[#07345e]">Your application tracker</h3>
+                    </div>
+                    <span className="rounded-full bg-[#eff8ff] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#0878c9]">
+                      {savedScholarships.length}
+                    </span>
+                  </div>
+
+                  <div className="mt-5 space-y-3">
+                    {savedScholarships.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                        Save scholarships you like and we’ll keep the next steps easy to track.
+                      </div>
+                    ) : (
+                      savedScholarships.slice(0, 3).map((scholarship) => (
+                        <article key={scholarship.id} className="rounded-[1.2rem] border border-slate-200 bg-[#f9fbff] p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-extrabold text-[#07345e]">{scholarship.title}</p>
+                              <p className="mt-1 text-xs text-slate-500">{scholarship.amount || "Amount not listed"} • {scholarship.deadline || "Check deadline"}</p>
+                            </div>
+                            <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#0878c9]">
+                              {scholarship.status}
+                            </span>
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_20px_55px_rgba(5,52,94,0.08)] sm:p-8">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Next actions</p>
+                    <h3 className="mt-2 text-2xl font-black text-[#07345e]">What to do next</h3>
+                  </div>
+                  <span className="rounded-full bg-[#eff8ff] px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#0878c9]">Focus</span>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {roadmapTasks.slice(0, 3).map((task) => (
+                    <article key={task.id} className="rounded-[1.25rem] border border-blue-100 bg-[#f9fbff] p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#0878c9]" />
+                            <p className="text-base font-extrabold text-[#07345e]">{task.title}</p>
+                          </div>
+                          <p className="mt-2 text-sm leading-6 text-slate-600">{task.explanation}</p>
+                        </div>
+                        <select value={task.status} onChange={(event) => updateRoadmapTaskStatus(task.id, event.target.value as RoadmapTaskStatus)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-[#07345e] outline-none">
+                          <option>Not Started</option>
+                          <option>In Progress</option>
+                          <option>Completed</option>
+                        </select>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </section>
           ) : (
             <>
@@ -1527,11 +2201,17 @@ export default function App() {
                   >
                     See how it works
                   </a>
+                  <a
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-7 py-4 font-extrabold text-[#b7283f] transition hover:border-red-300 hover:bg-red-50"
+                    href="#funding-roadmap"
+                  >
+                    Explore the funding roadmap
+                  </a>
                 </div>
                 <div className="mt-8 flex flex-wrap gap-x-7 gap-y-3 text-sm font-semibold text-slate-600">
                   {["Completely free", "Scholarships + financial aid", "No hidden fees—ever"].map((item) => (
                     <span className="flex items-center gap-2" key={item}>
-                      <span className="grid h-5 w-5 place-items-center rounded-full bg-blue-100 text-[#0878c9]">
+                      <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-emerald-700">
                         <Icon className="h-3 w-3">
                           <path d="m5 12 4 4L19 6" />
                         </Icon>
@@ -1543,17 +2223,17 @@ export default function App() {
               </div>
 
               <div className="relative mx-auto w-full max-w-[570px]">
-                <div className="absolute -right-4 -top-5 h-28 w-28 rounded-[2rem] bg-[#13a66f]" />
+                <div className="absolute -right-4 -top-5 h-24 w-24 rounded-[1.5rem] bg-sky-100/90" />
                 <div className="absolute -bottom-5 -left-5 h-32 w-32 rounded-full border-[18px] border-blue-200" />
                 <div className="relative overflow-hidden rounded-[2.2rem] border-[7px] border-white bg-white shadow-2xl shadow-blue-900/15">
                   <img
                     src={heroImage}
                     alt="College students collaborating around a laptop"
-                    className="h-[420px] w-full object-cover sm:h-[510px]"
+                    className="hero-photo h-[420px] w-full object-cover sm:h-[510px]"
                   />
                   <div className="absolute inset-x-5 bottom-5 rounded-2xl bg-white/95 p-4 shadow-xl backdrop-blur">
                     <div className="flex items-center gap-4">
-                      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-red-50 text-[#cf334a]">
+                      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
                         <Icon className="h-6 w-6">
                           <path d="M12 3v18M17 7.5c0-2-2-3-5-3s-5 1.2-5 3 1.8 2.8 5 3.5 5 1.8 5 4-2 4-5 4-5-1.2-5-3" />
                         </Icon>
@@ -1565,14 +2245,55 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-                <div className="absolute -right-3 bottom-24 z-10 flex items-center gap-2 rounded-2xl border border-blue-100 bg-white py-2 pl-2 pr-4 shadow-xl sm:-right-7">
-                  <EagleBuddy className="h-12 w-12 shrink-0 opacity-90" />
+                <div className="absolute -right-3 bottom-24 z-10 rounded-2xl border border-blue-100 bg-white px-4 py-2 shadow-xl sm:-right-7">
                   <div>
-                    <p className="text-xs font-extrabold uppercase tracking-wider text-[#d83a4a]">Meet Liberty</p>
+                    <p className="text-xs font-extrabold uppercase tracking-wider text-[#d83a4a]">Meet ScholarBot</p>
                     <p className="text-sm font-bold text-[#07345e]">Your free aid buddy</p>
                   </div>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section id="funding-roadmap" className="border-y border-blue-100 bg-[#eff8ff]">
+            <div className="mx-auto max-w-7xl px-5 py-16 sm:px-8 sm:py-20">
+              <div className="max-w-3xl">
+                <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-[#cf334a]">Funding roadmap</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-[#07345e] sm:text-4xl">
+                  A clear path from planning to paying for college
+                </h2>
+                <p className="mt-4 text-lg leading-8 text-slate-600">
+                  Get oriented, find funding that fits, and keep the next steps in view. Sign in for a personalized checklist, application tracker, and cost estimate.
+                </p>
+              </div>
+              <ol className="mt-10 grid gap-x-8 gap-y-7 border-t border-blue-200 pt-7 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ["01", "Understand your costs", "Estimate tuition, housing, and other expenses."],
+                  ["02", "Plan for financial aid", "Review FAFSA steps and school deadlines."],
+                  ["03", "Find scholarships", "Focus on opportunities that match your goals."],
+                  ["04", "Track your progress", "Keep applications, follow-ups, and next steps together."],
+                ].map(([number, title, description]) => (
+                  <li key={number}>
+                    <span className="text-sm font-extrabold text-[#cf334a]">{number}</span>
+                    <h3 className="mt-2 text-lg font-extrabold text-[#07345e]">{title}</h3>
+                    <p className="mt-2 leading-6 text-slate-600">{description}</p>
+                  </li>
+                ))}
+              </ol>
+              <button
+                className="mt-8 inline-flex items-center justify-center rounded-xl bg-[#07345e] px-6 py-3.5 font-extrabold text-white transition hover:bg-[#052c4a]"
+                onClick={() => {
+                  if (currentUser) {
+                    setActiveTab("roadmap");
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  } else {
+                    setAuthError("");
+                    setModal("register");
+                  }
+                }}
+              >
+                {currentUser ? "Open my funding roadmap" : "Build my funding roadmap"}
+              </button>
             </div>
           </section>
 
@@ -1609,7 +2330,7 @@ export default function App() {
                   number: "03",
                   color: "bg-blue-50 text-[#0878c9]",
                   title: "Apply with confidence",
-                  text: "Track progress, understand financial aid, and ask Liberty for help whenever you need it.",
+                  text: "Track progress, understand financial aid, and ask ScholarBot for help whenever you need it.",
                   icon: <path d="M5 3h14v18H5zM9 8h6M9 12h6M9 16h4" />,
                 },
               ].map((step) => (
@@ -1771,7 +2492,7 @@ export default function App() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-extrabold text-[#07345e]">ScholarPath guide</p>
-                <p className="mt-1 text-sm text-slate-500">Your free eagle buddy</p>
+                <p className="mt-1 text-sm text-slate-500">Your free ScholarBot buddy</p>
               </div>
               <button
                 aria-label="Close chat"
@@ -1790,7 +2511,6 @@ export default function App() {
                   key={`${message.role}-${index}`}
                   className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  {message.role === "bot" && <EagleBuddy className="mr-2 h-9 w-9 shrink-0" />}
                   <div
                     className={`max-w-[85%] rounded-2xl px-3 py-2.5 text-sm leading-6 ${
                       message.role === "bot"
@@ -1852,13 +2572,13 @@ export default function App() {
           className="ml-auto flex h-14 items-center gap-2 rounded-full bg-[#07345e] px-5 font-extrabold text-white shadow-xl transition hover:-translate-y-0.5"
           onClick={() => setChatOpen((open) => !open)}
           aria-expanded={chatOpen}
-          aria-label="Toggle Liberty AI helper"
+          aria-label="Toggle ScholarBot AI helper"
         >
-          <Icon className="h-5 w-5">
-            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" />
-            <path d="M8 10h.01M12 10h.01M16 10h.01" />
-          </Icon>
-          Ask Liberty
+          <svg aria-hidden="true" className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 18 3 21V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7Z" />
+            <path d="M8 9h8M8 13h6" />
+          </svg>
+          Ask ScholarBot
         </button>
       </div>
 
@@ -1871,6 +2591,10 @@ export default function App() {
           }}
           onRegister={handleRegister}
           onLogin={handleLogin}
+          onModeChange={setModal}
+          onForgotPassword={handleForgotPassword}
+          onResetPassword={handleResetPassword}
+          resetToken={resetToken}
           errorMessage={authError}
           helperMessage={statusMessage}
         />

@@ -42,10 +42,30 @@ describe("student profile normalization", () => {
     expect(profile.gender).toBe("");
     expect(profile.grade).toBe("");
     expect(profile.gpa).toBe("3.8");
+    expect(profile.apTests3Plus).toBe("");
+    expect(profile.citizenshipStatus).toBe("");
+    expect(profile.familyIncomeRange).toBe("");
+    expect(profile.isInUS).toBe("");
+    expect(profile.state).toBe("");
+    expect(profile.leadershipActivities).toBe("");
     expect(profile.newsletters).toEqual([]);
   });
 
   it("preserves the selected grade level", () => {
     expect(normalizeStudentProfile({ grade: "11" }).grade).toBe("11");
+  });
+
+  it("preserves the added academic and location details", () => {
+    const profile = normalizeStudentProfile({
+      apTests3Plus: "3",
+      isInUS: "yes",
+      state: "California",
+      leadershipActivities: "Student council",
+    });
+
+    expect(profile.apTests3Plus).toBe("3");
+    expect(profile.isInUS).toBe("yes");
+    expect(profile.state).toBe("California");
+    expect(profile.leadershipActivities).toBe("Student council");
   });
 });

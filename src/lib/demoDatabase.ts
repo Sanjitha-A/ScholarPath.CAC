@@ -1,7 +1,6 @@
 import { normalizeStudentProfile, profileDefaults, type StoredUser, type StudentProfile } from "./auth";
 
 export const DEMO_DATABASE_KEY = "scholarpath_demo_database_v2";
-export const DEMO_ADMIN_PASSWORD = "ScholarPathAdminDemo2026!";
 
 type DemoUser = StoredUser & {
   id: string;
@@ -27,8 +26,6 @@ type DemoDatabase = {
   currentUserId: string | null;
   nextNewsletterId: number;
 };
-
-let demoAdminCredentials: Promise<{ passwordSalt: string; passwordHash: string }> | undefined;
 
 function getStorage(): Storage {
   if (typeof window === "undefined") throw new Error("Demo storage is only available in a browser.");
@@ -72,21 +69,9 @@ async function loadDatabase(): Promise<DemoDatabase> {
     database = createEmptyDatabase();
   }
 
-  const admin = database.users.find((user) => user.username.toLowerCase() === "admin");
-  if (admin) {
-    admin.isAdmin = true;
-  } else {
-    demoAdminCredentials ??= createPasswordHash(DEMO_ADMIN_PASSWORD);
-    database.users.push({
-      id: "demo-admin",
-      username: "admin",
-      fullName: "ScholarPath Demo Admin",
-      email: null,
-      isAdmin: true,
-      profile: normalizeStudentProfile({}),
-      ...(await demoAdminCredentials),
-    });
-  }
+  database.users.forEach((user) => {
+    user.isAdmin = false;
+  });
 
   storage.setItem(DEMO_DATABASE_KEY, JSON.stringify(database));
   return database;

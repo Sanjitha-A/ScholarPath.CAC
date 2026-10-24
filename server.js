@@ -114,6 +114,19 @@ async function ensureDatabase() {
     )
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      used_at DATETIME NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX password_reset_user_id_idx (user_id),
+      CONSTRAINT password_reset_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
   const [adminRows] = await db.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', [adminUsername]);
   if (adminRows.length) {
     await db.execute(
@@ -308,6 +321,39 @@ const registerLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many account creation attempts. Please try again later.' },
 });
+const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many password reset requests. Please try again later.' },
+});
+
+async function sendPasswordResetEmail(email, resetUrl) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM;
+  if (!apiKey || !from) {
+    throw new Error('Password reset email is not configured. Set RESEND_API_KEY and EMAIL_FROM.');
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: [email],
+      subject: 'Reset your ScholarPath password',
+      html: `<p>We received a request to reset your ScholarPath password.</p><p><a href="${resetUrl}">Reset your password</a></p><p>This link expires in one hour and can only be used once. If you did not request this, you can ignore this email.</p>`,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Email delivery failed with status ${response.status}.`);
+  }
+}
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -344,10 +390,13 @@ app.post('/api/register', registerLimiter, async (req, res) => {
   const fullName = String(req.body?.fullName ?? '').trim();
   const username = String(req.body?.username ?? '').trim();
   const password = String(req.body?.password ?? '');
-  const email = String(req.body?.email ?? '').trim();
+  const email = String(req.body?.email ?? '').trim().toLowerCase();
 
-  if (!fullName || !username || !password) {
-    return res.status(400).json({ message: 'Full name, username, and password are required.' });
+  if (!fullName || !username || !email || !password) {
+    return res.status(400).json({ message: 'Full name, username, email, and password are required.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'Enter a valid email address.' });
   }
   if (password.length < 12) {
     return res.status(400).json({ message: 'Choose a password with at least 12 characters.' });
@@ -361,6 +410,10 @@ app.post('/api/register', registerLimiter, async (req, res) => {
     const [existingRows] = await db.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', [username]);
     if (existingRows.length) {
       return res.status(409).json({ message: 'That username is already taken. Please choose another one.' });
+    }
+    const [existingEmailRows] = await db.execute('SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1', [email]);
+    if (existingEmailRows.length) {
+      return res.status(409).json({ message: 'That email is already associated with an account.' });
     }
 
     const profile = {
@@ -395,6 +448,83 @@ app.post('/api/register', registerLimiter, async (req, res) => {
   } catch (error) {
     console.error('Register failed:', error);
     return res.status(500).json({ message: 'Unable to save your account in the SQL database right now.' });
+  }
+});
+
+app.post('/api/password-reset/request', passwordResetLimiter, async (req, res) => {
+  const email = String(req.body?.email ?? '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'Enter a valid email address.' });
+  }
+
+  try {
+    const db = await getPool();
+    const [rows] = await db.execute(
+      'SELECT id, email FROM users WHERE LOWER(email) = LOWER(?) AND role = ? LIMIT 2',
+      [email, 'student'],
+    );
+    if (rows.length !== 1) return res.json({ ok: true });
+
+    const token = crypto.randomBytes(32).toString('base64url');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await db.execute('DELETE FROM password_reset_tokens WHERE user_id = ?', [rows[0].id]);
+    await db.execute(
+      'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR))',
+      [rows[0].id, tokenHash],
+    );
+
+    const frontendUrl = process.env.PUBLIC_FRONTEND_URL;
+    if (!frontendUrl) throw new Error('PUBLIC_FRONTEND_URL is required for password reset emails.');
+    const resetUrl = new URL('/', frontendUrl);
+    resetUrl.hash = new URLSearchParams({ resetToken: token }).toString();
+
+    try {
+      await sendPasswordResetEmail(rows[0].email, resetUrl.toString());
+    } catch (error) {
+      await db.execute('DELETE FROM password_reset_tokens WHERE token_hash = ?', [tokenHash]);
+      throw error;
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error('Password reset request failed:', error.message);
+    return res.status(503).json({ message: 'Password reset email is temporarily unavailable. Please try again later.' });
+  }
+});
+
+app.post('/api/password-reset/confirm', passwordResetLimiter, async (req, res) => {
+  const token = String(req.body?.token ?? '');
+  const password = String(req.body?.password ?? '');
+  if (!token || password.length < 12) {
+    return res.status(400).json({ message: 'The reset link or new password is invalid.' });
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  let connection;
+  try {
+    const db = await getPool();
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      'SELECT id, user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP() FOR UPDATE',
+      [tokenHash],
+    );
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'This password reset link is invalid or has expired. Request a new one.' });
+    }
+
+    const reset = rows[0];
+    await connection.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(password), reset.user_id]);
+    await connection.execute('DELETE FROM password_reset_tokens WHERE user_id = ?', [reset.user_id]);
+    await connection.commit();
+    return res.json({ ok: true });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error('Password reset confirmation failed:', error.message);
+    return res.status(500).json({ message: 'Unable to reset your password right now.' });
+  } finally {
+    connection?.release();
   }
 });
 

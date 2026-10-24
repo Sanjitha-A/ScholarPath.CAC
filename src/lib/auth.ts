@@ -4,10 +4,16 @@ export type StudentProfile = {
   age: string;
   gpa: string;
   apCount: string;
+  apTests3Plus: string;
+  citizenshipStatus: string;
+  familyIncomeRange: string;
+  isInUS: string;
+  state: string;
   school?: string;
   major?: string;
   graduationYear?: string;
   interests?: string;
+  leadershipActivities?: string;
   newsletters?: string[];
   grade?: string;
 };
@@ -28,10 +34,16 @@ export const profileDefaults: StudentProfile = {
   grade: "",
   gpa: "",
   apCount: "",
+  apTests3Plus: "",
+  citizenshipStatus: "",
+  familyIncomeRange: "",
+  isInUS: "",
+  state: "",
   school: "",
   major: "",
   graduationYear: "",
   interests: "",
+  leadershipActivities: "",
   newsletters: [],
 };
 
@@ -47,10 +59,16 @@ export function normalizeStudentProfile(value: unknown): StudentProfile {
     grade: typeof profile.grade === "string" ? profile.grade : "",
     gpa: typeof profile.gpa === "string" ? profile.gpa : "",
     apCount: typeof profile.apCount === "string" ? profile.apCount : "",
+    apTests3Plus: typeof profile.apTests3Plus === "string" ? profile.apTests3Plus : "",
+    citizenshipStatus: typeof profile.citizenshipStatus === "string" ? profile.citizenshipStatus : "",
+    familyIncomeRange: typeof profile.familyIncomeRange === "string" ? profile.familyIncomeRange : "",
+    isInUS: typeof profile.isInUS === "string" ? profile.isInUS : "",
+    state: typeof profile.state === "string" ? profile.state : "",
     school: typeof profile.school === "string" ? profile.school : "",
     major: typeof profile.major === "string" ? profile.major : "",
     graduationYear: typeof profile.graduationYear === "string" ? profile.graduationYear : "",
     interests: typeof profile.interests === "string" ? profile.interests : "",
+    leadershipActivities: typeof profile.leadershipActivities === "string" ? profile.leadershipActivities : "",
     newsletters: Array.isArray(profile.newsletters)
       ? profile.newsletters.filter((item): item is string => typeof item === "string")
       : [],

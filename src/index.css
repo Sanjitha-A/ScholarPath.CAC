@@ -64,6 +64,11 @@ svg {
   max-width: 100%;
 }
 
+.hero-photo {
+  filter: saturate(0.62) contrast(1.12) brightness(1.06) sepia(0.08) hue-rotate(-18deg);
+  transform: scale(1.02);
+}
+
 ::selection {
   color: #ffffff;
   background: #0878c9;
